@@ -662,13 +662,26 @@ function cancelSaveModal() {
 }
 
 function showSavedSuccess(id) {
-  $("saved-message").textContent = `Your pack was saved as ID ${id}. Players can download it in the game using that ID.`;
+  const idStr = String(id);
+  $("saved-id").textContent = idStr;
+  $("pack-id").value = idStr;
   $("saved-modal").hidden = false;
+  showToast(`Pack saved as ID ${idStr}`, "ok", 3500);
 }
 
 $("save-submit").addEventListener("click", submitSaveModal);
 $("save-cancel").addEventListener("click", cancelSaveModal);
 $("saved-ok").addEventListener("click", () => { $("saved-modal").hidden = true; });
+$("saved-copy").addEventListener("click", async () => {
+  const id = $("saved-id").textContent;
+  if (!id || id === "—") return;
+  try {
+    await navigator.clipboard.writeText(id);
+    showToast("Pack ID copied", "ok", 1500);
+  } catch {
+    showToast("Couldn't copy — select the ID and copy manually", "error", 3000);
+  }
+});
 $("save-password").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); submitSaveModal(); }
 });

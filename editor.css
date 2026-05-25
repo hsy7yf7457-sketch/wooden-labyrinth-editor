@@ -770,6 +770,33 @@ body[data-view="empty"] .panel-right { display: none; }
 }
 .modal-footer-spacer { flex: 1 1 auto; }
 
+.saved-body { text-align: center; }
+.saved-id-block {
+  padding: 8px 0 12px;
+}
+.saved-id-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+}
+.saved-id-num {
+  display: block;
+  font-size: 52px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-2);
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.saved-hint {
+  margin: 0;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .status-row {
   display: flex;
   align-items: center;
