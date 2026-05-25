@@ -896,6 +896,10 @@ function getSelectedRect() {
   return null;
 }
 
+function selectionResizable(sel) {
+  return sel && (sel.kind === "wall" || sel.kind === "hole");
+}
+
 function deleteSelected() {
   const sel = state.selection;
   if (!sel) return;
@@ -1236,10 +1240,10 @@ function draw() {
       sel && sel.kind === "goal");
   }
 
-  // Selection handles last
+  // Selection handles last (walls and holes only — start/goal are fixed size)
   if (state.tool === "select") {
     const r = getSelectedRect();
-    if (r) drawSelectionHandles(r);
+    if (r && selectionResizable(state.selection)) drawSelectionHandles(r);
   }
 
   drawDraft();
@@ -1370,9 +1374,8 @@ canvas.addEventListener("pointerdown", (e) => {
   const lvl = currentLevel();
 
   if (state.tool === "select") {
-    // Resize handle if selection exists and we hit it
     const selRect = getSelectedRect();
-    if (selRect) {
+    if (selRect && selectionResizable(state.selection)) {
       const h = hitHandle(selRect, p);
       if (h) {
         pushHistory();
@@ -1418,23 +1421,23 @@ canvas.addEventListener("pointerdown", (e) => {
     syncAll();
   } else if (state.tool === "start") {
     pushHistory();
-    lvl.start = snapRect({
-      x: p.x - DEFAULT_START_SIZE / 2,
-      y: p.y - DEFAULT_START_SIZE / 2,
+    lvl.start = {
+      x: clamp(snap(p.x - DEFAULT_START_SIZE / 2), 0, BOARD_W - DEFAULT_START_SIZE),
+      y: clamp(snap(p.y - DEFAULT_START_SIZE / 2), 0, BOARD_H - DEFAULT_START_SIZE),
       width: DEFAULT_START_SIZE,
       height: DEFAULT_START_SIZE,
-    });
+    };
     setSelection({ kind: "start", idx: null });
     setTool("select");
     syncAll();
   } else if (state.tool === "goal") {
     pushHistory();
-    lvl.goal = snapRect({
-      x: p.x - DEFAULT_GOAL_SIZE / 2,
-      y: p.y - DEFAULT_GOAL_SIZE / 2,
+    lvl.goal = {
+      x: clamp(snap(p.x - DEFAULT_GOAL_SIZE / 2), 0, BOARD_W - DEFAULT_GOAL_SIZE),
+      y: clamp(snap(p.y - DEFAULT_GOAL_SIZE / 2), 0, BOARD_H - DEFAULT_GOAL_SIZE),
       width: DEFAULT_GOAL_SIZE,
       height: DEFAULT_GOAL_SIZE,
-    });
+    };
     setSelection({ kind: "goal", idx: null });
     setTool("select");
     syncAll();
@@ -1454,7 +1457,7 @@ canvas.addEventListener("pointermove", (e) => {
   // Hover detection (select tool only)
   if (state.tool === "select") {
     const selRect = getSelectedRect();
-    if (selRect) {
+    if (selRect && selectionResizable(state.selection)) {
       const h = hitHandle(selRect, p);
       if (h) {
         canvas.style.cursor = handleCursor(h);
@@ -1578,13 +1581,17 @@ function syncSelectionPanel() {
   $("sel-x").value = Math.round(r.x);
   $("sel-y").value = Math.round(r.y);
   const isHole = sel.kind === "hole";
+  const isFixedSize = sel.kind === "start" || sel.kind === "goal";
+  $("sel-size-row").hidden = isFixedSize;
   $("sel-w-label").textContent = isHole ? "Size" : "Width";
   $("sel-h-field").hidden = isHole;
-  if (isHole) {
-    $("sel-w").value = Math.round(Math.max(r.width, r.height));
-  } else {
-    $("sel-w").value = Math.round(r.width);
-    $("sel-h").value = Math.round(r.height);
+  if (!isFixedSize) {
+    if (isHole) {
+      $("sel-w").value = Math.round(Math.max(r.width, r.height));
+    } else {
+      $("sel-w").value = Math.round(r.width);
+      $("sel-h").value = Math.round(r.height);
+    }
   }
   $("sel-wall-extra").hidden = sel.kind !== "wall";
   if (sel.kind === "wall") {
@@ -1600,6 +1607,10 @@ function bindSelectionField(id, prop) {
   $(id).addEventListener("input", () => {
     const r = getSelectedRect();
     if (!r) return;
+    if ((state.selection?.kind === "start" || state.selection?.kind === "goal") &&
+        (prop === "width" || prop === "height")) {
+      return;
+    }
     let v = +$(id).value;
     if (Number.isNaN(v)) v = 0;
     if (state.selection?.kind === "hole" && (prop === "width" || prop === "height")) {
