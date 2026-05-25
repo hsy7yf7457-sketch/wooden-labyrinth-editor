@@ -93,7 +93,12 @@ const assetsReady = Promise.all([
   loadImage("strip", assetUrl("assets/wood-strip.jpg")),
   loadImage("borderV", assetUrl("assets/border-v.png")),
   loadImage("borderH", assetUrl("assets/border-h.png")),
-  loadImage("hole",  assetUrl("assets/hole.png")),
+  loadImage("hole",     assetUrl("assets/hole.png")),
+  loadImage("ball",     assetUrl("assets/ball.png")),
+  loadImage("goal",     assetUrl("assets/goal.png")),
+  loadImage("wallH",    assetUrl("assets/wall-h.png")),
+  loadImage("wallV",    assetUrl("assets/wall-v.png")),
+  loadImage("wallSide", assetUrl("assets/wall-side.png")),
 ]);
 
 // ----------------------- Helpers -----------------------
@@ -1028,160 +1033,80 @@ function drawGrid() {
   ctx.restore();
 }
 
-function drawWall(w, hovered, selected) {
-  ctx.save();
-  // Drop shadow proportional to height (full walls cast more shadow)
-  const sh = w.size === 1 ? 3 : 1.5;
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  roundRect(ctx, w.x + sh, w.y + sh, w.width, w.height, 1);
-  ctx.fill();
+// Same texture pick as Labyrinth.mm renderBitWidth:w height:h
+function pickWallTexture(width, height) {
+  if (width > 3 * height) return assets.wallH;
+  if (height > 3 * width) return assets.wallV;
+  return assets.wallSide;
+}
 
-  // Plank body — high walls are dark brown, low walls are medium brown.
-  const grad = ctx.createLinearGradient(0, w.y, 0, w.y + w.height);
-  if (w.size === 1) {
-    grad.addColorStop(0, "#5a3a22");
-    grad.addColorStop(0.5, "#3a2515");
-    grad.addColorStop(1, "#2e1d12");
+function fillTiledTexture(img, x, y, w, h, fallback) {
+  if (img) {
+    ctx.fillStyle = ctx.createPattern(img, "repeat");
   } else {
-    grad.addColorStop(0, "#9a6638");
-    grad.addColorStop(0.5, "#7a5230");
-    grad.addColorStop(1, "#6e4a2c");
+    ctx.fillStyle = fallback || "#3a2515";
   }
-  ctx.fillStyle = grad;
-  roundRect(ctx, w.x, w.y, w.width, w.height, 1);
-  ctx.fill();
+  ctx.fillRect(x, y, w, h);
+}
 
-  // Subtle grain stripes (along the longer dim)
-  ctx.save();
-  ctx.beginPath();
-  roundRect(ctx, w.x, w.y, w.width, w.height, 1);
-  ctx.clip();
-  ctx.strokeStyle = "rgba(80, 50, 30, 0.25)";
-  ctx.lineWidth = 0.5;
-  const horizontal = w.width >= w.height;
-  ctx.beginPath();
-  if (horizontal) {
-    for (let y = w.y + 2; y < w.y + w.height; y += 3) {
-      ctx.moveTo(w.x, y + 0.5);
-      ctx.lineTo(w.x + w.width, y + 0.5);
-    }
+function drawStretchTexture(img, x, y, w, h, fallback) {
+  if (img) {
+    ctx.drawImage(img, x, y, w, h);
   } else {
-    for (let x = w.x + 2; x < w.x + w.width; x += 3) {
-      ctx.moveTo(x + 0.5, w.y);
-      ctx.lineTo(x + 0.5, w.y + w.height);
-    }
+    ctx.fillStyle = fallback || "#3a2515";
+    ctx.fillRect(x, y, w, h);
   }
-  ctx.stroke();
-  ctx.restore();
+}
 
-  // Top highlight
-  ctx.strokeStyle = "rgba(255, 235, 200, 0.5)";
-  ctx.lineWidth = 0.75;
-  ctx.beginPath();
-  ctx.moveTo(w.x + 0.5, w.y + 0.5);
-  ctx.lineTo(w.x + w.width - 0.5, w.y + 0.5);
-  ctx.stroke();
-
-  // Border
-  ctx.strokeStyle = "rgba(40, 22, 12, 0.6)";
-  ctx.lineWidth = 0.75;
-  roundRect(ctx, w.x + 0.5, w.y + 0.5, w.width - 1, w.height - 1, 1);
-  ctx.stroke();
-
-  if (hovered || selected) {
-    ctx.strokeStyle = selected ? "rgba(232, 177, 106, 1)" : "rgba(232, 177, 106, 0.55)";
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, w.x - 1, w.y - 1, w.width + 2, w.height + 2, 2);
+function drawHoverOutline(r, hovered, selected, round) {
+  if (!hovered && !selected) return;
+  ctx.strokeStyle = selected ? "rgba(232, 177, 106, 1)" : "rgba(232, 177, 106, 0.55)";
+  ctx.lineWidth = 1.5;
+  if (round) {
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+    const rad = Math.min(r.width, r.height) / 2 + 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    roundRect(ctx, r.x - 1, r.y - 1, r.width + 2, r.height + 2, 2);
     ctx.stroke();
   }
+}
+
+function drawWall(w, hovered, selected) {
+  ctx.save();
+  const tex = pickWallTexture(w.width, w.height);
+  const fallback = w.size === 1 ? "#3a2515" : "#7a5230";
+  fillTiledTexture(tex, w.x, w.y, w.width, w.height, fallback);
+  // Low walls are shorter in 3D — tint the flat top face slightly lighter.
+  if (w.size < 1) {
+    ctx.fillStyle = "rgba(154, 102, 56, 0.28)";
+    ctx.fillRect(w.x, w.y, w.width, w.height);
+  }
+  drawHoverOutline(w, hovered, selected, false);
   ctx.restore();
 }
 
 function drawHole(h, hovered, selected) {
   ctx.save();
-  const cx = h.x + h.width / 2;
-  const cy = h.y + h.height / 2;
-  const rOuter = Math.max(MIN_HOLE, Math.min(h.width, h.height)) / 2;
-
-  // Rim shadow
-  ctx.beginPath();
-  ctx.arc(cx + 1, cy + 1.5, rOuter, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  ctx.fill();
-
-  // Metal rim
-  const rimGrad = ctx.createRadialGradient(cx - rOuter * 0.4, cy - rOuter * 0.4, rOuter * 0.2,
-                                            cx, cy, rOuter);
-  rimGrad.addColorStop(0, "#f4f6f8");
-  rimGrad.addColorStop(0.45, "#b8bcc0");
-  rimGrad.addColorStop(1, "#5a5e62");
-  ctx.beginPath();
-  ctx.arc(cx, cy, rOuter, 0, Math.PI * 2);
-  ctx.fillStyle = rimGrad;
-  ctx.fill();
-
-  // Hole opening
-  const rInner = rOuter * 0.78;
-  const holeGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rInner);
-  holeGrad.addColorStop(0, "#000");
-  holeGrad.addColorStop(0.7, "#0a0807");
-  holeGrad.addColorStop(1, "#1a1410");
-  ctx.beginPath();
-  ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
-  ctx.fillStyle = holeGrad;
-  ctx.fill();
-
-  // Rim highlight
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
-  ctx.lineWidth = 0.6;
-  ctx.beginPath();
-  ctx.arc(cx - 0.3, cy - 0.3, rOuter - 0.5, Math.PI * 0.9, Math.PI * 1.8);
-  ctx.stroke();
-
-  if (hovered || selected) {
-    ctx.strokeStyle = selected ? "rgba(232, 177, 106, 1)" : "rgba(232, 177, 106, 0.55)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rOuter + 2, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+  drawStretchTexture(assets.hole, h.x, h.y, h.width, h.height, "#0a0807");
+  drawHoverOutline(h, hovered, selected, true);
   ctx.restore();
 }
 
-function drawMarker(r, color, label, hovered, selected) {
+function drawStart(r, hovered, selected) {
   ctx.save();
-  ctx.fillStyle = "rgba(0,0,0,0.4)";
-  roundRect(ctx, r.x + 1.5, r.y + 2, r.width, r.height, 4);
-  ctx.fill();
+  drawStretchTexture(assets.ball, r.x, r.y, r.width, r.height, "#b8bcc0");
+  drawHoverOutline(r, hovered, selected, true);
+  ctx.restore();
+}
 
-  // Pad
-  const grad = ctx.createLinearGradient(0, r.y, 0, r.y + r.height);
-  grad.addColorStop(0, color.light);
-  grad.addColorStop(1, color.dark);
-  ctx.fillStyle = grad;
-  roundRect(ctx, r.x, r.y, r.width, r.height, 4);
-  ctx.fill();
-
-  // Edge
-  ctx.strokeStyle = "rgba(0,0,0,0.55)";
-  ctx.lineWidth = 0.75;
-  roundRect(ctx, r.x + 0.5, r.y + 0.5, r.width - 1, r.height - 1, 4);
-  ctx.stroke();
-
-  // Label
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  ctx.font = "bold " + Math.round(Math.min(r.width, r.height) * 0.5) + "px " +
-             "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(label, r.x + r.width / 2, r.y + r.height / 2 + 0.5);
-
-  if (hovered || selected) {
-    ctx.strokeStyle = selected ? "rgba(232, 177, 106, 1)" : "rgba(232, 177, 106, 0.55)";
-    ctx.lineWidth = 1.5;
-    roundRect(ctx, r.x - 1, r.y - 1, r.width + 2, r.height + 2, 5);
-    ctx.stroke();
-  }
+function drawGoal(r, hovered, selected) {
+  ctx.save();
+  drawStretchTexture(assets.goal, r.x, r.y, r.width, r.height, "#1a1a1a");
+  drawHoverOutline(r, hovered, selected, false);
   ctx.restore();
 }
 
@@ -1253,12 +1178,12 @@ function draw() {
       sel && sel.kind === "hole" && sel.idx === i);
   }
   if (lvl.start) {
-    drawMarker(lvl.start, { light: "#9ce69a", dark: "#3c8c3a" }, "S",
+    drawStart(lvl.start,
       hov && hov.kind === "start",
       sel && sel.kind === "start");
   }
   if (lvl.goal) {
-    drawMarker(lvl.goal, { light: "#f7b27a", dark: "#c1502a" }, "G",
+    drawGoal(lvl.goal,
       hov && hov.kind === "goal",
       sel && sel.kind === "goal");
   }
@@ -1790,67 +1715,59 @@ function wireTileDnd(tile) {
   });
 }
 
-// Tiny renderer for the overview tiles. Doesn't bother with the textures or
-// nice gradients — just enough to recognise the level layout.
+// Tiny renderer for the overview tiles — same game textures, scaled down.
 function drawLevelThumb(canvas, lvl) {
   const c = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  // Plain wood-tone background — lighter than wall planks.
-  const bg = c.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, "#d4b48a");
-  bg.addColorStop(1, "#c4a070");
-  c.fillStyle = bg;
-  c.fillRect(0, 0, W, H);
+  if (assets.board) {
+    c.drawImage(assets.board, 0, 0, W, H);
+  } else {
+    c.fillStyle = "#c9a67a";
+    c.fillRect(0, 0, W, H);
+  }
 
-  // Map board (BOARD_W x BOARD_H) → canvas (W x H).
   const sx = W / BOARD_W, sy = H / BOARD_H;
   const px = (n) => n * sx;
   const py = (n) => n * sy;
+  const tileFill = (img, x, y, w, h, fallback) => {
+    if (img) {
+      c.fillStyle = c.createPattern(img, "repeat");
+    } else {
+      c.fillStyle = fallback;
+    }
+    c.fillRect(x, y, w, h);
+  };
+  const stretch = (img, x, y, w, h, fallback) => {
+    if (img) c.drawImage(img, x, y, w, h);
+    else { c.fillStyle = fallback; c.fillRect(x, y, w, h); }
+  };
 
-  // Walls — high = dark brown, low = medium brown.
   for (const w of lvl.walls) {
-    c.fillStyle = w.size === 0.5 ? "#7a5230" : "#3a2515";
-    c.fillRect(px(w.x), py(w.y), px(w.width), py(w.height));
-  }
-  // Holes
-  for (const h of lvl.holes) {
-    const cx = px(h.x + h.width / 2);
-    const cy = py(h.y + h.height / 2);
-    const r = Math.max(2, Math.min(px(h.width), py(h.height)) / 2);
-    c.fillStyle = "#0a0807";
-    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
-  }
-  // Start (silver ball)
-  if (lvl.start) {
-    const cx = px(lvl.start.x + lvl.start.width / 2);
-    const cy = py(lvl.start.y + lvl.start.height / 2);
-    const r = Math.max(2, Math.min(px(lvl.start.width), py(lvl.start.height)) / 2);
-    const g = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.2, cx, cy, r);
-    g.addColorStop(0, "#fff");
-    g.addColorStop(1, "#5a5e62");
-    c.fillStyle = g;
-    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
-  }
-  // Goal (checker square)
-  if (lvl.goal) {
-    const gx = px(lvl.goal.x), gy = py(lvl.goal.y);
-    const gw = px(lvl.goal.width), gh = py(lvl.goal.height);
-    const tile = Math.max(2, gw / 4);
-    for (let yy = 0; yy < gh; yy += tile) {
-      for (let xx = 0; xx < gw; xx += tile) {
-        const dark = ((Math.floor(xx / tile) + Math.floor(yy / tile)) % 2) === 0;
-        c.fillStyle = dark ? "#1a1a1a" : "#f4f4f4";
-        c.fillRect(gx + xx, gy + yy, tile, tile);
-      }
+    const tex = pickWallTexture(w.width, w.height);
+    tileFill(tex, px(w.x), py(w.y), px(w.width), py(w.height),
+      w.size === 0.5 ? "#7a5230" : "#3a2515");
+    if (w.size < 1) {
+      c.fillStyle = "rgba(154, 102, 56, 0.28)";
+      c.fillRect(px(w.x), py(w.y), px(w.width), py(w.height));
     }
   }
-  // Permanent border rails
+  for (const h of lvl.holes) {
+    stretch(assets.hole, px(h.x), py(h.y), px(h.width), py(h.height), "#0a0807");
+  }
+  if (lvl.start) {
+    stretch(assets.ball, px(lvl.start.x), py(lvl.start.y),
+      px(lvl.start.width), py(lvl.start.height), "#b8bcc0");
+  }
+  if (lvl.goal) {
+    stretch(assets.goal, px(lvl.goal.x), py(lvl.goal.y),
+      px(lvl.goal.width), py(lvl.goal.height), "#1a1a1a");
+  }
+
   const bw = px(BORDER_W), bh = py(BORDER_W);
-  c.fillStyle = "#6e4a2c";
-  c.fillRect(0, 0, bw, H);
-  c.fillRect(W - bw, 0, bw, H);
-  c.fillRect(bw, 0, W - 2 * bw, bh);
-  c.fillRect(bw, H - bh, W - 2 * bw, bh);
+  tileFill(assets.borderV, 0, 0, bw, H, "#6e4a2c");
+  tileFill(assets.borderV, W - bw, 0, bw, H, "#6e4a2c");
+  tileFill(assets.borderH, bw, 0, W - 2 * bw, bh, "#6e4a2c");
+  tileFill(assets.borderH, bw, H - bh, W - 2 * bw, bh, "#6e4a2c");
 }
 
 // ----------------------- Editor header (back, prev, next) -----------------------
