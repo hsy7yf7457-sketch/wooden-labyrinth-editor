@@ -31,6 +31,7 @@ const DEFAULT_START_SIZE = 30;
 const DEFAULT_GOAL_SIZE = 32;
 const MIN_WALL = 4;
 const MIN_HOLE = 8;
+const BORDER_W = 20; // permanent side/top/bottom rails (matches iOS game)
 const HISTORY_LIMIT = 100;
 
 // Resolve paths from this script's folder (reliable on GitHub Pages subpaths).
@@ -90,6 +91,8 @@ const assetsReady = Promise.all([
   loadImage("frame", assetUrl("assets/wood-frame.jpg")),
   loadImage("board", assetUrl("assets/board-bg.png")),
   loadImage("strip", assetUrl("assets/wood-strip.jpg")),
+  loadImage("borderV", assetUrl("assets/border-v.png")),
+  loadImage("borderH", assetUrl("assets/border-h.png")),
   loadImage("hole",  assetUrl("assets/hole.png")),
 ]);
 
@@ -973,6 +976,26 @@ function drawBoardBackground() {
   ctx.restore();
 }
 
+// Fixed border rails around the board — not stored in level XML; always present in-game.
+function drawBorderWalls() {
+  ctx.save();
+  const innerW = BOARD_W - BORDER_W * 2;
+  const fillTiled = (img, x, y, w, h) => {
+    if (img) {
+      const pat = ctx.createPattern(img, "repeat");
+      ctx.fillStyle = pat;
+    } else {
+      ctx.fillStyle = "#3a2515";
+    }
+    ctx.fillRect(x, y, w, h);
+  };
+  fillTiled(assets.borderV, 0, 0, BORDER_W, BOARD_H);
+  fillTiled(assets.borderV, BOARD_W - BORDER_W, 0, BORDER_W, BOARD_H);
+  fillTiled(assets.borderH, BORDER_W, 0, innerW, BORDER_W);
+  fillTiled(assets.borderH, BORDER_W, BOARD_H - BORDER_W, innerW, BORDER_W);
+  ctx.restore();
+}
+
 function drawGrid() {
   if (!state.options.grid) return;
   const step = state.options.step;
@@ -1239,6 +1262,8 @@ function draw() {
       hov && hov.kind === "goal",
       sel && sel.kind === "goal");
   }
+
+  drawBorderWalls();
 
   // Selection handles last (walls and holes only — start/goal are fixed size)
   if (state.tool === "select") {
@@ -1819,6 +1844,13 @@ function drawLevelThumb(canvas, lvl) {
       }
     }
   }
+  // Permanent border rails
+  const bw = px(BORDER_W), bh = py(BORDER_W);
+  c.fillStyle = "#6e4a2c";
+  c.fillRect(0, 0, bw, H);
+  c.fillRect(W - bw, 0, bw, H);
+  c.fillRect(bw, 0, W - 2 * bw, bh);
+  c.fillRect(bw, H - bh, W - 2 * bw, bh);
 }
 
 // ----------------------- Editor header (back, prev, next) -----------------------
