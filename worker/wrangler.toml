@@ -1,0 +1,12 @@
+name = "wl-editor-save"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+GITHUB_OWNER = "hsy7yf7457-sketch"
+GITHUB_REPO = "wooden-labyrinth-editor"
+GITHUB_BRANCH = "main"
+PACKS_PREFIX = "packs"
+
+# Set the secret once after deploy:
+#   wrangler secret put GITHUB_TOKEN

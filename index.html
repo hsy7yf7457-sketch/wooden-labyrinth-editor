@@ -18,10 +18,7 @@
   </div>
 
   <div class="pack-picker">
-    <select id="pack-select" aria-label="Pack list">
-      <option value="">— choose a pack —</option>
-    </select>
-    <input id="pack-id" type="text" placeholder="…or pack ID (e.g. 117)" autocomplete="off" spellcheck="false" inputmode="numeric" />
+    <input id="pack-id" type="text" placeholder="Pack ID (e.g. 117)" autocomplete="off" spellcheck="false" inputmode="numeric" />
     <button id="btn-open" class="btn" type="button">Open</button>
   </div>
 
@@ -32,7 +29,6 @@
     </span>
     <button id="btn-new-pack" class="btn btn-ghost" type="button">New…</button>
     <button id="btn-save" class="btn btn-primary" type="button" disabled>Save</button>
-    <button id="btn-settings" class="icon-btn icon-btn-lg" type="button" title="Settings" aria-label="Settings">⚙</button>
   </div>
 </header>
 
@@ -64,7 +60,7 @@
     <div id="board-empty" class="board-empty">
       <div class="board-empty-card">
         <h2>No pack open</h2>
-        <p>Pick a pack from the dropdown above, type its ID, or click <strong>New…</strong> to start a fresh pack.</p>
+        <p>Type a pack ID and click <strong>Open</strong>, or click <strong>New…</strong> to start a fresh pack.</p>
       </div>
     </div>
 
@@ -133,7 +129,7 @@
         <strong>Tip:</strong> drag the corner handle to resize a wall. Press
         <kbd>H</kbd> to toggle wall height (full / half). Arrows nudge selection
         (<kbd>⇧</kbd> = 10 px). <kbd>D</kbd> duplicates, <kbd>⌫</kbd> deletes.
-        <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> undo / redo. <kbd>⌘S</kbd> saves to GitHub.
+        <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> undo / redo. <kbd>⌘S</kbd> saves your pack.
       </div>
     </div>
   </section>
@@ -200,82 +196,7 @@
   </aside>
 </main>
 
-<!-- ============================== Settings modal ============================== -->
-<div id="settings-modal" class="modal" hidden aria-modal="true" role="dialog">
-  <div class="modal-backdrop" data-close></div>
-  <div class="modal-card">
-    <header class="modal-header">
-      <h2>Settings</h2>
-      <button class="icon-btn" type="button" data-close aria-label="Close">×</button>
-    </header>
-
-    <div class="modal-body">
-      <section class="modal-section">
-        <div class="status-row">
-          <span id="status-dot" class="status-dot status-dot-unknown"></span>
-          <span id="status-text" class="status-text">Not connected</span>
-        </div>
-      </section>
-
-      <section class="modal-section">
-        <h3>GitHub repository</h3>
-        <label class="field">
-          <span>Owner / repo</span>
-          <input id="cfg-repo" type="text" placeholder="user/repo" autocomplete="off" spellcheck="false" />
-        </label>
-        <div class="field-row">
-          <label class="field">
-            <span>Branch</span>
-            <input id="cfg-branch" type="text" placeholder="main" autocomplete="off" spellcheck="false" />
-          </label>
-          <label class="field">
-            <span>Packs directory</span>
-            <input id="cfg-prefix" type="text" placeholder="packs" autocomplete="off" spellcheck="false" />
-          </label>
-        </div>
-      </section>
-
-      <section class="modal-section">
-        <h3>Personal access token</h3>
-        <p class="muted">
-          A token is required to <em>save</em> packs. It's stored only in this
-          browser (<code>localStorage</code>). Reading packs from a public repo
-          works without a token.
-        </p>
-        <label class="field">
-          <span>Token</span>
-          <input id="cfg-token" type="password" placeholder="github_pat_… or ghp_…" autocomplete="off" spellcheck="false" />
-        </label>
-        <details class="help">
-          <summary>How do I create one?</summary>
-          <ol class="help-list">
-            <li>
-              Open
-              <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener">
-                github.com/settings/personal-access-tokens
-              </a>
-              and click <b>Generate new token</b> (fine-grained).
-            </li>
-            <li>Resource owner: <b>your user</b>. Repository access: <b>Only select repositories</b> → pick this editor's repo.</li>
-            <li>Permissions → Repository permissions → <b>Contents: Read and write</b>.</li>
-            <li>Generate, copy the token, paste it above, click <b>Save settings</b>.</li>
-          </ol>
-        </details>
-      </section>
-    </div>
-
-    <footer class="modal-footer">
-      <button id="cfg-test" class="btn btn-ghost" type="button">Test connection</button>
-      <div class="modal-footer-spacer"></div>
-      <button id="cfg-cancel" class="btn btn-ghost" type="button" data-close>Cancel</button>
-      <button id="cfg-save" class="btn btn-primary" type="button">Save settings</button>
-    </footer>
-  </div>
-</div>
-
-<!-- ============================== New-pack modal ==============================
-  Creates a pack in browser memory only. Nothing hits the server until the
-  user clicks Save (which opens the first-save modal below). -->
+<!-- ============================== New-pack modal ============================== -->
 <div id="newpack-modal" class="modal" hidden aria-modal="true" role="dialog">
   <div class="modal-backdrop" data-close></div>
   <div class="modal-card modal-card-sm">
@@ -285,8 +206,8 @@
     </header>
     <div class="modal-body">
       <p class="muted">
-        Creates an empty pack in your browser. Nothing is uploaded until you
-        click <b>Save</b>; you'll get an ID and set the save password then.
+        Creates an empty pack in your browser. Click <b>Save</b> when you're
+        ready — you'll get an ID and can optionally set a password.
       </p>
       <label class="field">
         <span>Pack name (shown in game)</span>
@@ -305,66 +226,45 @@
   </div>
 </div>
 
-<!-- ============================== First-save modal ==============================
-  Shown the first time you save a brand-new pack. Assigns the next free ID
-  (>= 500), and lets you set the optional save password that will gate
-  future saves. -->
-<div id="firstsave-modal" class="modal" hidden aria-modal="true" role="dialog">
+<!-- ============================== Save password modal ============================== -->
+<div id="save-modal" class="modal" hidden aria-modal="true" role="dialog">
   <div class="modal-backdrop"></div>
   <div class="modal-card modal-card-sm">
     <header class="modal-header">
-      <h2>Save new pack</h2>
+      <h2 id="save-title">Save pack</h2>
     </header>
     <div class="modal-body">
-      <p class="muted">
-        About to commit this pack as <code id="fs-id-preview">packs/pack<wbr/>500.xml</code>.
-        Once saved, the ID is reserved and the password (if any) is fixed.
-      </p>
+      <p id="save-message" class="muted"></p>
       <label class="field">
-        <span>Save password (optional)</span>
-        <input id="fs-password" type="password" autocomplete="new-password" placeholder="Leave blank for no password" />
-        <small class="muted">
-          If set, only this password will allow saving edits later. Loading
-          the pack will not require it.
-        </small>
-      </label>
-      <label class="field" id="fs-confirm-row" hidden>
-        <span>Confirm password</span>
-        <input id="fs-confirm" type="password" autocomplete="new-password" />
-        <small id="fs-error" class="pwd-error"></small>
+        <span id="save-password-label">Password (optional)</span>
+        <input id="save-password" type="password" autocomplete="new-password" placeholder="Leave blank for no password" />
+        <small id="save-error" class="pwd-error"></small>
       </label>
     </div>
     <footer class="modal-footer">
       <div class="modal-footer-spacer"></div>
-      <button id="fs-cancel" class="btn btn-ghost" type="button">Cancel</button>
-      <button id="fs-save" class="btn btn-primary" type="button">Save</button>
+      <button id="save-cancel" class="btn btn-ghost" type="button">Cancel</button>
+      <button id="save-submit" class="btn btn-primary" type="button">Save</button>
     </footer>
   </div>
 </div>
 
-<!-- ============================== Password prompt modal ============================== -->
-<div id="pp-modal" class="modal" hidden aria-modal="true" role="dialog">
+<!-- ============================== Saved successfully modal ============================== -->
+<div id="saved-modal" class="modal" hidden aria-modal="true" role="dialog">
   <div class="modal-backdrop"></div>
   <div class="modal-card modal-card-sm">
     <header class="modal-header">
-      <h2 id="pp-title">Password required</h2>
+      <h2>Saved successfully</h2>
     </header>
     <div class="modal-body">
-      <p id="pp-message" class="muted"></p>
-      <label class="field">
-        <span>Password</span>
-        <input id="pp-input" type="password" autocomplete="current-password" />
-        <small id="pp-error" class="pwd-error"></small>
-      </label>
+      <p id="saved-message" class="muted"></p>
     </div>
     <footer class="modal-footer">
       <div class="modal-footer-spacer"></div>
-      <button id="pp-cancel" class="btn btn-ghost" type="button">Cancel</button>
-      <button id="pp-submit" class="btn btn-primary" type="button">Unlock</button>
+      <button id="saved-ok" class="btn btn-primary" type="button">OK</button>
     </footer>
   </div>
 </div>
-
 
 <div id="toast" class="toast" hidden></div>
 

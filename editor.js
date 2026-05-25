@@ -122,28 +122,32 @@ async function sha256Hex(str) {
 }
 
 // ----------------------- ID / filename helpers -----------------------
-// The iOS game uses two pack naming conventions:
-//   - "built-in" packs:   <name>.xml         (e.g. beginner.xml)
-//   - downloadable packs: pack<NUM>.xml      (e.g. pack117.xml)
-// The editor's "ID" is the human form: a number for numeric packs (117) or
-// the slug for named packs (beginner). On disk we always map back via these.
+// Every pack file is packs/pack{id}.xml — official packs (1–499) and
+// player-created packs (500+). No runtime catalog.
 function idToFilename(id) {
   const s = String(id).trim();
-  return /^\d+$/.test(s) ? `pack${s}.xml` : `${s}.xml`;
+  if (!/^\d+$/.test(s)) throw new Error("Pack ID must be a number.");
+  return `pack${s}.xml`;
 }
+
 function filenameToId(filename) {
-  const base = String(filename).replace(/\.xml$/i, "");
-  const m = base.match(/^pack(\d+)$/i);
-  return m ? m[1] : base;
+  const m = String(filename).replace(/\.xml$/i, "").match(/^pack(\d+)$/i);
+  return m ? m[1] : null;
 }
+
 function isNumericId(id) { return /^\d+$/.test(String(id).trim()); }
 
-function getNextFreeNumericId(packs, start = 500) {
+function getAllTakenNumericIds(extraPacks = []) {
   const taken = new Set();
-  for (const p of packs) {
+  for (const p of extraPacks) {
     const s = String(p.id);
     if (/^\d+$/.test(s)) taken.add(+s);
   }
+  return taken;
+}
+
+function getNextFreeNumericId(extraPacks = [], start = 500) {
+  const taken = getAllTakenNumericIds(extraPacks);
   let n = start;
   while (taken.has(n)) n++;
   return n;
@@ -377,21 +381,21 @@ function serializePack(pack) {
 }
 
 // ===========================================================================
-//   GitHub data layer
+//   Persistence
 //
-//   The editor's persistence model is "the GitHub repo is the database":
-//     - Reads come straight from the same-origin Pages site (fast, CDN-cached).
-//     - The Contents API is used once on load to list packs (and capture their
-//       SHAs, needed for safe writes).
-//     - Writes go through the Contents API with a user-supplied PAT stored only
-//       in localStorage. The PAT needs Contents: read & write on this repo.
+//   Reads: static files on GitHub Pages (./packs/pack{id}.xml).
+//   Writes: public save API (Cloudflare Worker) — players never see tokens.
 // ===========================================================================
 
-const CONFIG_KEY = "wlle.config.v1";
-const TOKEN_KEY  = "wlle.ghpat.v1";
+const SAVE_API_URL = (() => {
+  try {
+    const s = localStorage.getItem("wlle.saveApi");
+    if (s) return s.replace(/\/$/, "");
+  } catch (_) {}
+  return "https://wl-editor-save.hsy7yf7457-sketch.workers.dev";
+})();
 
-function detectConfig() {
-  // username.github.io/<repo>/level-editor/  →  owner = username, repo = <repo>
+function detectRepo() {
   const host = location.hostname;
   const m = host.match(/^([^.]+)\.github\.io$/i);
   if (m) {
@@ -400,163 +404,84 @@ function detectConfig() {
       return { owner: m[1], repo: parts[0], branch: "main", prefix: "packs" };
     }
   }
-  // Local dev fallback — user-overridable in Settings.
-  return { owner: "", repo: "", branch: "main", prefix: "packs" };
+  return { owner: "hsy7yf7457-sketch", repo: "wooden-labyrinth-editor", branch: "main", prefix: "packs" };
 }
 
-function loadConfig() {
-  const detected = detectConfig();
-  let stored = {};
-  try { stored = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}"); } catch (_) {}
-  return { ...detected, ...stored };
-}
-
-function saveConfig(cfg) {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
-}
+const repo = detectRepo();
 
 const gh = {
-  config: loadConfig(),
-  shaCache: new Map(), // id → sha (last known)
+  shaCache: new Map(), // id → sha
 
-  get token() { return localStorage.getItem(TOKEN_KEY) || ""; },
-  set token(v) {
-    if (v) localStorage.setItem(TOKEN_KEY, v);
-    else localStorage.removeItem(TOKEN_KEY);
-  },
-
-  get configured() {
-    return !!(this.config.owner && this.config.repo);
-  },
-
-  apiRoot() {
-    return `https://api.github.com/repos/${this.config.owner}/${this.config.repo}`;
-  },
-  rawRoot() {
-    return `https://raw.githubusercontent.com/${this.config.owner}/${this.config.repo}/${this.config.branch}`;
-  },
   pathFor(id) {
-    const p = this.config.prefix ? this.config.prefix.replace(/^\/+|\/+$/g, "") + "/" : "";
+    const p = repo.prefix ? repo.prefix.replace(/^\/+|\/+$/g, "") + "/" : "";
     return `${p}${idToFilename(id)}`;
   },
 
-  async api(path, init = {}) {
-    const headers = {
-      "Accept": "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(init.headers || {}),
-    };
-    if (this.token) headers.Authorization = "Bearer " + this.token;
-    if (init.body) headers["Content-Type"] = "application/json";
-    const res = await fetch(this.apiRoot() + path, { ...init, headers });
-    if (!res.ok) {
-      let msg = `${res.status} ${res.statusText}`;
-      try { const j = await res.json(); if (j.message) msg = `${res.status} ${j.message}`; } catch (_) {}
-      const e = new Error("GitHub: " + msg);
-      e.status = res.status;
-      throw e;
-    }
-    if (res.status === 204) return null;
-    return res.json();
+  packFile(id) {
+    return idToFilename(id);
   },
 
-  async listPacks() {
-    if (!this.configured) throw new Error("Repo not configured. Open Settings.");
-    const dir = (this.config.prefix || "").replace(/^\/+|\/+$/g, "");
-    const items = await this.api(`/contents/${dir}?ref=${encodeURIComponent(this.config.branch)}`);
-    const out = [];
-    for (const x of items) {
-      if (x.type !== "file" || !/\.xml$/i.test(x.name)) continue;
-      const id = filenameToId(x.name);
-      this.shaCache.set(id, x.sha);
-      out.push({ id, filename: x.name, sha: x.sha, size: x.size });
-    }
-    // Numeric IDs first (ascending), then named packs alphabetical.
-    out.sort((a, b) => {
-      const an = /^\d+$/.test(a.id), bn = /^\d+$/.test(b.id);
-      if (an && bn) return +a.id - +b.id;
-      if (an) return -1;
-      if (bn) return 1;
-      return a.id.localeCompare(b.id);
-    });
-    return out;
-  },
-
-  // Read via Pages-served URL when same-origin (fast, CDN-cached); fall back
-  // to the raw.githubusercontent.com URL for local dev or non-Pages hosts.
   async readPack(id) {
-    if (!this.configured) throw new Error("Repo not configured.");
     const path = this.pathFor(id);
-    const sameOriginPages =
-      location.hostname.toLowerCase() === `${this.config.owner.toLowerCase()}.github.io` &&
-      location.pathname.split("/").filter(Boolean)[0] === this.config.repo;
-    let xml;
-    if (sameOriginPages) {
-      // The editor and `packs/` ship together at the repo root, so the file
-      // lives next to index.html. Cache-bust so a fresh save is visible on
-      // the next reload.
-      const res = await fetch(`./${path}?_=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error(`Couldn't load "${id}": ${res.status} ${res.statusText}`);
-      xml = await res.text();
-    } else {
-      const res = await fetch(`${this.rawRoot()}/${path}?_=${Date.now()}`, { cache: "no-store" });
-      if (!res.ok) throw new Error(`Couldn't load "${id}": ${res.status} ${res.statusText}`);
-      xml = await res.text();
-    }
-    // Refresh SHA via the Contents API so subsequent saves succeed.
-    let sha = this.shaCache.get(id);
-    if (!sha) {
+    const url = `./${path}?_=${Date.now()}`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw Object.assign(new Error(`Couldn't load pack ${id}: ${res.status}`), { status: res.status });
+    const xml = await res.text();
+    let sha = this.shaCache.get(String(id)) || null;
+    if (!sha && SAVE_API_URL) {
       try {
-        const meta = await this.api(`/contents/${path}?ref=${encodeURIComponent(this.config.branch)}`);
+        const meta = await saveApi.getSha(path);
         sha = meta.sha;
-        this.shaCache.set(id, sha);
-      } catch (e) {
-        if (e.status !== 404) throw e;
-        sha = null;
-      }
+        if (sha) this.shaCache.set(String(id), sha);
+      } catch (_) {}
     }
     return { xml, sha };
   },
 
-  async writePack(id, xml, sha, isNew) {
-    if (!this.configured) throw new Error("Repo not configured.");
-    if (!this.token) throw new Error("No GitHub token set — open Settings.");
-    const path = this.pathFor(id);
-    const body = {
-      message: `${isNew ? "Create" : "Update"} ${path} via Level Editor`,
-      content: utf8ToBase64(xml),
-      branch: this.config.branch,
-    };
-    if (sha) body.sha = sha;
-    const data = await this.api(`/contents/${path}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
-    const newSha = data?.content?.sha;
-    if (newSha) this.shaCache.set(id, newSha);
-    return { sha: newSha, commit: data?.commit };
+  async listPacksOnServer() {
+    if (!SAVE_API_URL) return [];
+    const data = await saveApi.listPacks();
+    for (const p of data.packs || []) {
+      this.shaCache.set(String(p.id), p.sha);
+    }
+    return data.packs || [];
   },
 
-  async testToken() {
-    if (!this.token) return { authed: false };
-    const res = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: "Bearer " + this.token,
-        Accept: "application/vnd.github+json",
-      },
-    });
-    if (!res.ok) throw new Error(`Token test failed: ${res.status} ${res.statusText}`);
-    const user = await res.json();
-    return { authed: true, login: user.login };
+  async writePack(id, xml, sha, isNew) {
+    const filename = this.packFile(id);
+    const data = await saveApi.save({ filename, xml, sha, isNew });
+    if (data.sha) this.shaCache.set(String(id), data.sha);
+    return { sha: data.sha };
   },
 };
 
-function utf8ToBase64(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin);
-}
+const saveApi = {
+  async listPacks() {
+    const res = await fetch(`${SAVE_API_URL}/packs`, { cache: "no-store" });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(j.error || `Save service error (${res.status})`), { status: res.status });
+    }
+    return res.json();
+  },
+
+  async getSha(path) {
+    const res = await fetch(`${SAVE_API_URL}/sha?file=${encodeURIComponent(path)}`, { cache: "no-store" });
+    if (!res.ok) return { sha: null };
+    return res.json();
+  },
+
+  async save({ filename, xml, sha, isNew }) {
+    const res = await fetch(`${SAVE_API_URL}/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename, xml, sha, isNew }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(j.error || `Save failed (${res.status})`), { status: res.status });
+    return j;
+  },
+};
 
 // ----------------------- High-level open / save / new -----------------------
 function setLoaded(loaded) {
@@ -639,192 +564,184 @@ function backToPack() {
 async function openPackById(rawId) {
   const id = String(rawId || "").trim();
   if (!id) { showToast("Enter a pack ID.", "error"); return; }
+  if (!isNumericId(id)) { showToast("Pack ID must be a number.", "error"); return; }
   if (!confirmDiscardDirty()) return;
-  if (!gh.configured) { openSettings("Configure the GitHub repo first."); return; }
   showToast(`Loading pack ${id}…`);
   try {
     const { xml, sha } = await gh.readPack(id);
     const pack = parsePack(xml);
     applyLoadedPack(id, pack, sha);
-    showToast(`Opened pack ${id} (${pack.levels.length} level${pack.levels.length === 1 ? "" : "s"})`, "ok");
+    showToast(`Opened ${pack.packname}`, "ok");
   } catch (e) {
     console.error(e);
     if (e.status === 404) {
-      showToast(`Pack ${id} doesn't exist. Create it with "New…" or pick a different ID.`, "error");
+      showToast("No pack found.", "error");
     } else {
       showToast(e.message || "Failed to open pack", "error");
     }
   }
 }
 
-// Save flow has three branches:
-//
-//   (a) Pack is brand-new (state.loaded.id == null):
-//         pop the "first save" modal — pick next free ID, set optional
-//         password, commit. ID is reserved at this moment, never earlier.
-//   (b) Pack was loaded from the server and has a <password> in its XML:
-//         pop the "enter password" modal, verify against the stored hash,
-//         then commit. Verified password is cached per pack ID for this
-//         session so subsequent saves don't re-prompt.
-//   (c) Pack was loaded from the server with no password:
-//         commit directly. The editor never adds a password to a pack that
-//         didn't have one at load time — password is set once, on first save.
+// ----------------------- Save flow (public player editor) -----------------------
+// New pack:     Save → optional password popup → auto next ID → success popup
+// Protected:    Save → verify password → save → success popup
+// Unprotected:  Save → save → success popup
+
+let saveModalResolve = null;
+
+function promptSavePassword({ title, message, label, verifyHash = null }) {
+  return new Promise((resolve) => {
+    saveModalResolve = resolve;
+    $("save-title").textContent = title || "Save pack";
+    $("save-message").textContent = message || "";
+    $("save-password-label").textContent = label || "Password (optional)";
+    $("save-password").value = "";
+    $("save-password").placeholder = verifyHash ? "Enter password" : "Leave blank for no password";
+    $("save-error").textContent = "";
+    $("save-modal").dataset.verifyHash = verifyHash || "";
+    $("save-modal").hidden = false;
+    setTimeout(() => $("save-password").focus(), 0);
+  });
+}
+
+async function submitSaveModal() {
+  const pwd = $("save-password").value;
+  const dlg = $("save-modal");
+  const verifyHash = dlg.dataset.verifyHash;
+  if (verifyHash) {
+    const h = await sha256Hex(pwd);
+    if (h !== verifyHash) {
+      $("save-error").textContent = "Wrong password.";
+      $("save-password").select();
+      return;
+    }
+  }
+  dlg.hidden = true;
+  const r = saveModalResolve; saveModalResolve = null;
+  if (r) r(pwd);
+}
+
+function cancelSaveModal() {
+  $("save-modal").hidden = true;
+  const r = saveModalResolve; saveModalResolve = null;
+  if (r) r(null);
+}
+
+function showSavedSuccess(id) {
+  $("saved-message").textContent = `Your pack was saved as ID ${id}. Players can download it in the game using that ID.`;
+  $("saved-modal").hidden = false;
+}
+
+$("save-submit").addEventListener("click", submitSaveModal);
+$("save-cancel").addEventListener("click", cancelSaveModal);
+$("saved-ok").addEventListener("click", () => { $("saved-modal").hidden = true; });
+$("save-password").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitSaveModal(); }
+});
+
 async function savePack() {
   if (!state.loaded) return;
-  if (!gh.token) { openSettings("Paste a GitHub token to save."); return; }
 
-  if (state.loaded.id == null) {
-    await firstSaveFlow();
-    return;
-  }
-
-  if (state.pack.passwordHash) {
+  // Existing protected pack — verify password first
+  if (state.loaded.id != null && state.pack.passwordHash) {
     const cached = state.unlock
                 && state.unlock.id === state.loaded.id
                 && state.unlock.hash === state.pack.passwordHash;
     if (!cached) {
-      const pwd = await promptPassword({
+      $("save-modal").dataset.verifyHash = state.pack.passwordHash;
+      const pwd = await promptSavePassword({
         title: "Password required",
-        message: `Pack ${state.loaded.id} is protected by the author. Enter the password to save your changes.`,
-        verifyHash: state.pack.passwordHash,
+        message: "This pack is protected. Enter the password to save your changes.",
+        label: "Password",
       });
+      $("save-modal").dataset.verifyHash = "";
       if (pwd == null) return;
       state.unlock = { id: state.loaded.id, hash: state.pack.passwordHash };
     }
+    try {
+      await doSaveCurrent();
+      showSavedSuccess(state.loaded.id);
+    } catch (e) {
+      showToast(e.message || "Save failed", "error");
+    }
+    return;
   }
 
-  await doSaveCurrent();
+  // Brand-new pack — optional password, then auto-assign next ID
+  if (state.loaded.id == null) {
+    $("save-modal").dataset.verifyHash = "";
+    const pwd = await promptSavePassword({
+      title: "Save pack",
+      message: "Enter a password to protect your pack from being edited by others. You may leave it empty.",
+      label: "Password (optional)",
+    });
+    if (pwd == null) return;
+
+    if (pwd) state.pack.passwordHash = await sha256Hex(pwd);
+    else state.pack.passwordHash = null;
+
+    let serverPacks = [];
+    try {
+      serverPacks = await gh.listPacksOnServer();
+    } catch (e) {
+      console.warn(e);
+    }
+
+    let id = getNextFreeNumericId(serverPacks, 500);
+    let attempt = 0;
+    while (attempt < 4) {
+      try {
+        const xml = serializePack(state.pack);
+        const { sha } = await gh.writePack(id, xml, null, true);
+        state.loaded = { id: String(id), sha, isNew: false, dirty: false };
+        if (state.pack.passwordHash) state.unlock = { id: state.loaded.id, hash: state.pack.passwordHash };
+        syncAll();
+        showSavedSuccess(id);
+        return;
+      } catch (e) {
+        if ((e.status === 422 || e.status === 409) && attempt < 3) {
+          serverPacks = await gh.listPacksOnServer().catch(() => serverPacks);
+          id = getNextFreeNumericId(serverPacks, id + 1);
+          attempt++;
+          continue;
+        }
+        showToast(e.message || "Save failed", "error");
+        return;
+      }
+    }
+    return;
+  }
+
+  // Existing unprotected pack
+  try {
+    await doSaveCurrent();
+    showSavedSuccess(state.loaded.id);
+  } catch (e) {
+    showToast(e.message || "Save failed", "error");
+  }
 }
 
 async function doSaveCurrent() {
   const id = state.loaded.id;
-  showToast(`Saving pack ${id}…`);
-  try {
-    const xml = serializePack(state.pack);
-    const { sha } = await gh.writePack(id, xml, state.loaded.sha, false);
-    state.loaded.sha = sha || state.loaded.sha;
-    state.loaded.isNew = false;
-    state.loaded.dirty = false;
-    syncLoadedIndicator();
-    showToast(`Saved pack ${id} ✓`, "ok");
-  } catch (e) {
-    console.error(e);
-    if (e.status === 409) {
-      showToast(`Conflict: pack ${state.loaded.id} was modified on GitHub since you opened it. Reload to merge manually.`, "error");
-    } else if (e.status === 401 || e.status === 403) {
-      showToast("Auth failed. Check that your token has Contents: read & write on this repo.", "error");
-    } else {
-      showToast(e.message || "Save failed", "error");
-    }
-  }
+  const xml = serializePack(state.pack);
+  const { sha } = await gh.writePack(id, xml, state.loaded.sha, false);
+  state.loaded.sha = sha || state.loaded.sha;
+  state.loaded.isNew = false;
+  state.loaded.dirty = false;
+  syncLoadedIndicator();
 }
 
-// First-save flow:
-//   1. List packs, compute next free ID ≥ 500.
-//   2. Pop the first-save modal: shows the ID, asks for an optional password
-//      (with confirmation if any password is typed).
-//   3. PUT with no SHA → creates the file. If 422/409 (someone took the ID
-//      in between), bump to the next free ID and retry.
-async function firstSaveFlow() {
-  let packs;
-  try {
-    packs = await gh.listPacks();
-  } catch (e) {
-    showToast(e.message || "Couldn't fetch pack list.", "error");
-    return;
-  }
-  let candidate = getNextFreeNumericId(packs, 500);
-  const choice = await promptFirstSave(candidate);
-  if (!choice) return;
-  const { password } = choice;
-
-  let passwordHash = null;
-  if (password && password.length) {
-    passwordHash = await sha256Hex(password);
-  }
-  state.pack.passwordHash = passwordHash;
-
-  let attempt = 0;
-  while (attempt < 4) {
-    try {
-      const xml = serializePack(state.pack);
-      showToast(`Saving as pack ${candidate}…`);
-      const { sha } = await gh.writePack(candidate, xml, null, true);
-      state.loaded = { id: String(candidate), sha, isNew: false, dirty: false };
-      if (passwordHash) state.unlock = { id: state.loaded.id, hash: passwordHash };
-      syncAll();
-      await refreshPackList();
-      showToast(`Saved pack ${candidate} ✓`, "ok");
-      return;
-    } catch (e) {
-      if ((e.status === 422 || e.status === 409) && attempt < 3) {
-        const fresh = await gh.listPacks();
-        candidate = getNextFreeNumericId(fresh, candidate + 1);
-        attempt++;
-        continue;
-      }
-      console.error(e);
-      if (e.status === 401 || e.status === 403) {
-        showToast("Auth failed. Check that your token has Contents: read & write on this repo.", "error");
-      } else {
-        showToast(e.message || "Save failed", "error");
-      }
-      return;
-    }
-  }
-}
-
-// New-pack flow — purely client-side. Nothing hits the server until the user
-// hits Save (which triggers `firstSaveFlow` above).
+// New-pack flow — purely client-side until Save assigns the next free ID.
 function createNewPack({ packname, author }) {
   if (!confirmDiscardDirty()) return;
   const pack = emptyPack();
   pack.packname = packname || "Untitled Pack";
   pack.author = author || "";
   applyLoadedPack(null, pack, null, { isNew: true, dirty: true });
-  showToast("New pack started. Edit, then click Save to commit.", "ok");
+  showToast("New pack started. Click Save when ready.", "ok");
 }
 
-// ----------------------- Pack-picker UI -----------------------
-async function refreshPackList() {
-  const sel = $("pack-select");
-  sel.innerHTML = `<option value="">— choose a pack —</option>`;
-  if (!gh.configured) {
-    sel.innerHTML = `<option value="">— configure repo in Settings —</option>`;
-    return;
-  }
-  try {
-    const packs = await gh.listPacks();
-    for (const p of packs) {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.id;
-      sel.appendChild(opt);
-    }
-    if (!packs.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.disabled = true;
-      opt.textContent = "(no packs yet — click New…)";
-      sel.appendChild(opt);
-    }
-  } catch (e) {
-    console.error(e);
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.disabled = true;
-    opt.textContent = `(${e.message})`;
-    sel.appendChild(opt);
-  }
-}
-
-$("pack-select").addEventListener("change", (e) => {
-  const id = e.target.value;
-  if (!id) return;
-  $("pack-id").value = id;
-  openPackById(id);
-});
-
+// ----------------------- Open by ID -----------------------
 $("pack-id").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
@@ -853,189 +770,6 @@ $("new-create").addEventListener("click", () => {
   });
 });
 
-// ----------------------- First-save modal -----------------------
-// Resolves to { password } or null (cancelled). Validates "password ===
-// confirm" only when the user actually typed a password.
-let firstSaveResolve = null;
-function promptFirstSave(candidateId) {
-  return new Promise((resolve) => {
-    firstSaveResolve = resolve;
-    const prefix = (gh.config.prefix || "").replace(/^\/+|\/+$/g, "");
-    $("fs-id-preview").textContent = prefix
-      ? `${prefix}/pack${candidateId}.xml`
-      : `pack${candidateId}.xml`;
-    $("fs-password").value = "";
-    $("fs-confirm").value = "";
-    $("fs-error").textContent = "";
-    $("fs-confirm-row").hidden = true;
-    $("firstsave-modal").hidden = false;
-    setTimeout(() => $("fs-password").focus(), 0);
-  });
-}
-
-$("fs-password").addEventListener("input", (e) => {
-  $("fs-confirm-row").hidden = !e.target.value;
-  if (!e.target.value) $("fs-confirm").value = "";
-  $("fs-error").textContent = "";
-});
-
-function submitFirstSave() {
-  const pwd = $("fs-password").value;
-  const conf = $("fs-confirm").value;
-  if (pwd && pwd !== conf) {
-    $("fs-error").textContent = "Confirmation doesn't match.";
-    $("fs-confirm").focus();
-    return;
-  }
-  $("firstsave-modal").hidden = true;
-  const r = firstSaveResolve; firstSaveResolve = null;
-  if (r) r({ password: pwd || null });
-}
-function cancelFirstSave() {
-  $("firstsave-modal").hidden = true;
-  const r = firstSaveResolve; firstSaveResolve = null;
-  if (r) r(null);
-}
-$("fs-save").addEventListener("click", submitFirstSave);
-$("fs-cancel").addEventListener("click", cancelFirstSave);
-$("fs-password").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !$("fs-confirm-row").hidden === false) {
-    // password-only field, no confirmation needed — submit immediately
-    e.preventDefault(); submitFirstSave();
-  }
-});
-$("fs-confirm").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); submitFirstSave(); }
-});
-
-// ----------------------- Settings modal -----------------------
-function openSettings(note) {
-  $("cfg-repo").value   = gh.config.owner && gh.config.repo
-    ? `${gh.config.owner}/${gh.config.repo}` : "";
-  $("cfg-branch").value = gh.config.branch || "main";
-  $("cfg-prefix").value = gh.config.prefix || "";
-  $("cfg-token").value  = gh.token;
-  setStatus("unknown", note || "Not connected. Test the token or save to apply changes.");
-  $("settings-modal").hidden = false;
-}
-
-function setStatus(kind, msg) {
-  const dot = $("status-dot");
-  dot.className = "status-dot status-dot-" + kind;
-  $("status-text").textContent = msg;
-}
-
-$("btn-settings").addEventListener("click", () => openSettings());
-
-$("cfg-test").addEventListener("click", async () => {
-  const repoVal = $("cfg-repo").value.trim();
-  const tokenVal = $("cfg-token").value.trim();
-  if (!repoVal.includes("/")) {
-    setStatus("error", "Repo must be in owner/name format.");
-    return;
-  }
-  // Temporarily apply token to gh for the test, but keep stored value intact
-  // until the user clicks Save settings.
-  const oldToken = gh.token;
-  gh.token = tokenVal;
-  const oldConfig = gh.config;
-  const [owner, repo] = repoVal.split("/");
-  gh.config = { owner, repo, branch: $("cfg-branch").value.trim() || "main", prefix: $("cfg-prefix").value.trim() };
-  try {
-    if (tokenVal) {
-      const t = await gh.testToken();
-      if (!t.authed) { setStatus("warn", "Token rejected."); return; }
-      // Verify token can write by checking repo permissions
-      const repoMeta = await gh.api("");
-      const perms = repoMeta.permissions || {};
-      if (perms.push) {
-        setStatus("ok", `Signed in as ${t.login}. Read & write access ✓`);
-      } else {
-        setStatus("warn", `Signed in as ${t.login}, but token has no write access on ${repoVal}.`);
-      }
-    } else {
-      // No token — check that the repo is at least readable
-      await gh.api("");
-      setStatus("warn", "Repo is readable. Add a token to save changes.");
-    }
-  } catch (e) {
-    console.error(e);
-    setStatus("error", e.message);
-  } finally {
-    gh.token = oldToken;
-    gh.config = oldConfig;
-  }
-});
-
-$("cfg-save").addEventListener("click", async () => {
-  const repoVal = $("cfg-repo").value.trim();
-  if (!repoVal.includes("/")) {
-    setStatus("error", "Repo must be in owner/name format.");
-    return;
-  }
-  const [owner, repo] = repoVal.split("/");
-  const cfg = {
-    owner,
-    repo,
-    branch: $("cfg-branch").value.trim() || "main",
-    prefix: $("cfg-prefix").value.trim(),
-  };
-  gh.config = cfg;
-  saveConfig(cfg);
-  gh.token = $("cfg-token").value.trim();
-  closeModals();
-  showToast("Settings saved.", "ok");
-  await refreshPackList();
-});
-
-// ----------------------- Password prompt modal -----------------------
-// Returns a Promise that resolves with the password the user typed (after we
-// verify it matches `verifyHash`), or null if cancelled.
-let passwordPromptResolve = null;
-function promptPassword({ title, message, verifyHash, requireMatch = true }) {
-  return new Promise((resolve) => {
-    passwordPromptResolve = resolve;
-    $("pp-title").textContent = title || "Password required";
-    $("pp-message").textContent = message || "";
-    $("pp-input").value = "";
-    $("pp-error").textContent = "";
-    $("pp-modal").dataset.verifyHash = verifyHash || "";
-    $("pp-modal").dataset.requireMatch = requireMatch ? "1" : "";
-    $("pp-modal").hidden = false;
-    setTimeout(() => $("pp-input").focus(), 0);
-  });
-}
-
-async function submitPasswordPrompt() {
-  const dlg = $("pp-modal");
-  const pwd = $("pp-input").value;
-  const expected = dlg.dataset.verifyHash;
-  const requireMatch = !!dlg.dataset.requireMatch;
-  if (requireMatch && expected) {
-    const h = await sha256Hex(pwd);
-    if (h !== expected) {
-      $("pp-error").textContent = "Wrong password.";
-      $("pp-input").select();
-      return;
-    }
-  }
-  dlg.hidden = true;
-  const r = passwordPromptResolve; passwordPromptResolve = null;
-  if (r) r(pwd);
-}
-
-function cancelPasswordPrompt() {
-  $("pp-modal").hidden = true;
-  const r = passwordPromptResolve; passwordPromptResolve = null;
-  if (r) r(null);
-}
-
-$("pp-submit").addEventListener("click", submitPasswordPrompt);
-$("pp-cancel").addEventListener("click", cancelPasswordPrompt);
-$("pp-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); submitPasswordPrompt(); }
-});
-
 // ----------------------- Sidebar pack section -----------------------
 // Read-only — password is set on first save and never changed afterwards.
 function syncPackSection() {
@@ -1046,7 +780,7 @@ function syncPackSection() {
     return;
   }
   if (state.loaded && state.loaded.id == null) {
-    el.textContent = "(set on first save)";
+    el.textContent = "(optional — set when you save)";
     el.className = "pwd-status";
   } else if (state.pack.passwordHash) {
     el.textContent = "🔒 Protected";
@@ -1058,12 +792,10 @@ function syncPackSection() {
 }
 
 function closeModals() {
-  $("settings-modal").hidden = true;
   $("newpack-modal").hidden = true;
-  $("pp-modal").hidden = true;
-  $("firstsave-modal").hidden = true;
-  if (passwordPromptResolve) { const r = passwordPromptResolve; passwordPromptResolve = null; r(null); }
-  if (firstSaveResolve) { const r = firstSaveResolve; firstSaveResolve = null; r(null); }
+  $("save-modal").hidden = true;
+  $("saved-modal").hidden = true;
+  if (saveModalResolve) { const r = saveModalResolve; saveModalResolve = null; r(null); }
 }
 
 document.querySelectorAll(".modal").forEach((m) => {
@@ -1074,7 +806,8 @@ document.querySelectorAll(".modal").forEach((m) => {
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    if (!$("settings-modal").hidden || !$("newpack-modal").hidden) {
+    const open = !$("newpack-modal").hidden || !$("save-modal").hidden || !$("saved-modal").hidden;
+    if (open) {
       closeModals();
       e.stopImmediatePropagation();
     }
@@ -1195,20 +928,24 @@ function resizeCanvasForDPR() {
 }
 
 function drawBoardBackground() {
-  // Inner play-field wood texture, tiled.
+  // Play-field wood — lighter than the wall planks.
   ctx.save();
   if (assets.board) {
     const pat = ctx.createPattern(assets.board, "repeat");
     ctx.fillStyle = pat;
   } else {
-    ctx.fillStyle = "#7a4f30";
+    ctx.fillStyle = "#c9a67a";
   }
   ctx.fillRect(0, 0, BOARD_W, BOARD_H);
 
-  // Slight vignette
-  const g = ctx.createRadialGradient(BOARD_W / 2, BOARD_H / 2, 80, BOARD_W / 2, BOARD_H / 2, 360);
+  // Lift the board above wall tones.
+  ctx.fillStyle = "rgba(255, 235, 210, 0.35)";
+  ctx.fillRect(0, 0, BOARD_W, BOARD_H);
+
+  // Very subtle edge darkening only.
+  const g = ctx.createRadialGradient(BOARD_W / 2, BOARD_H / 2, 100, BOARD_W / 2, BOARD_H / 2, 360);
   g.addColorStop(0, "rgba(0,0,0,0)");
-  g.addColorStop(1, "rgba(0,0,0,0.35)");
+  g.addColorStop(1, "rgba(0,0,0,0.12)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, BOARD_W, BOARD_H);
   ctx.restore();
@@ -1254,16 +991,16 @@ function drawWall(w, hovered, selected) {
   roundRect(ctx, w.x + sh, w.y + sh, w.width, w.height, 1);
   ctx.fill();
 
-  // Plank body — warmer for full walls, paler for low walls
+  // Plank body — high walls are dark brown, low walls are medium brown.
   const grad = ctx.createLinearGradient(0, w.y, 0, w.y + w.height);
   if (w.size === 1) {
-    grad.addColorStop(0, "#f0c98a");
-    grad.addColorStop(0.5, "#d49a5b");
-    grad.addColorStop(1, "#9a6638");
+    grad.addColorStop(0, "#5a3a22");
+    grad.addColorStop(0.5, "#3a2515");
+    grad.addColorStop(1, "#2e1d12");
   } else {
-    grad.addColorStop(0, "#d8b687");
-    grad.addColorStop(0.5, "#b88a59");
-    grad.addColorStop(1, "#8c5e36");
+    grad.addColorStop(0, "#9a6638");
+    grad.addColorStop(0.5, "#7a5230");
+    grad.addColorStop(1, "#6e4a2c");
   }
   ctx.fillStyle = grad;
   roundRect(ctx, w.x, w.y, w.width, w.height, 1);
@@ -1950,10 +1687,10 @@ function wireTileDnd(tile) {
 function drawLevelThumb(canvas, lvl) {
   const c = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  // Plain wood-tone background; could swap to a tiled texture later.
+  // Plain wood-tone background — lighter than wall planks.
   const bg = c.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, "#a0744a");
-  bg.addColorStop(1, "#6e4a2c");
+  bg.addColorStop(0, "#d4b48a");
+  bg.addColorStop(1, "#c4a070");
   c.fillStyle = bg;
   c.fillRect(0, 0, W, H);
 
@@ -1962,9 +1699,9 @@ function drawLevelThumb(canvas, lvl) {
   const px = (n) => n * sx;
   const py = (n) => n * sy;
 
-  // Walls
+  // Walls — high = dark brown, low = medium brown.
   for (const w of lvl.walls) {
-    c.fillStyle = w.size === 0.5 ? "rgba(60, 35, 20, 0.65)" : "#3a2515";
+    c.fillStyle = w.size === 0.5 ? "#7a5230" : "#3a2515";
     c.fillRect(px(w.x), py(w.y), px(w.width), py(w.height));
   }
   // Holes
@@ -2154,19 +1891,11 @@ window.addEventListener("pageshow", (e) => {
   if (e.persisted) closeModals();
 });
 
-assetsReady.then(async () => {
-  // Make sure nothing is showing from a hot-reload / bfcache restore.
+assetsReady.then(() => {
   closeModals();
   setView("empty");
 
   setTool("select");
   syncAll();
   history.past.length = 0;
-
-  // Auto-detect the GitHub repo from a Pages URL or restore previous config.
-  // No auto-modal on boot — the empty-board card invites the user to use
-  // Settings / New / Open themselves. Only fetch the listing if we can.
-  if (gh.configured) {
-    await refreshPackList();
-  }
 });
