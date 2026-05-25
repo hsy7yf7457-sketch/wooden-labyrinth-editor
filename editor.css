@@ -691,6 +691,43 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .help-list li { margin-bottom: 4px; }
 
+/* ---------- Sidebar: password row ---------- */
+.pwd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #14100c;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  min-height: 28px;
+}
+.pwd-status {
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.pwd-status-locked { color: var(--accent-2); }
+.pwd-status-open   { color: var(--ink-1); }
+
+.btn-sm {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.pwd-field > span { color: var(--ink-2); }
+
+.pwd-error {
+  color: var(--danger);
+  min-height: 14px;
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
 /* ---------- Scrollbars (mac-friendly) ---------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

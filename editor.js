@@ -97,8 +97,46 @@ function emptyPack() {
   return {
     packname: "My Pack",
     author: "Anonymous",
+    passwordHash: null,     // optional SHA-256 hex of the author's password
     levels: [emptyLevel()],
   };
+}
+
+// SHA-256 hex digest (Web Crypto). Used only for the editor-side "are you the
+// author?" gate, not real crypto — it just prevents casual overwrites of
+// password-protected packs through the editor UI.
+async function sha256Hex(str) {
+  const data = new TextEncoder().encode(String(str));
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ----------------------- ID / filename helpers -----------------------
+// The iOS game uses two pack naming conventions:
+//   - "built-in" packs:   <name>.xml         (e.g. beginner.xml)
+//   - downloadable packs: pack<NUM>.xml      (e.g. pack117.xml)
+// The editor's "ID" is the human form: a number for numeric packs (117) or
+// the slug for named packs (beginner). On disk we always map back via these.
+function idToFilename(id) {
+  const s = String(id).trim();
+  return /^\d+$/.test(s) ? `pack${s}.xml` : `${s}.xml`;
+}
+function filenameToId(filename) {
+  const base = String(filename).replace(/\.xml$/i, "");
+  const m = base.match(/^pack(\d+)$/i);
+  return m ? m[1] : base;
+}
+function isNumericId(id) { return /^\d+$/.test(String(id).trim()); }
+
+function getNextFreeNumericId(packs, start = 500) {
+  const taken = new Set();
+  for (const p of packs) {
+    const s = String(p.id);
+    if (/^\d+$/.test(s)) taken.add(+s);
+  }
+  let n = start;
+  while (taken.has(n)) n++;
+  return n;
 }
 
 function currentLevel() {
@@ -192,9 +230,13 @@ function parsePack(xmlText) {
     return el ? el.textContent.trim() : "";
   };
 
+  const pwd = txt(root, "password");
   const pack = {
     packname: txt(root, "packname") || "Unnamed Pack",
     author: txt(root, "author") || "",
+    // SHA-256 hex of the author's password, or null. Only present in packs
+    // saved via this editor; the iOS game silently ignores the element.
+    passwordHash: pwd ? pwd.toLowerCase() : null,
     levels: [],
   };
 
@@ -269,6 +311,9 @@ function serializePack(pack) {
   out.push("<Levelpack>");
   out.push(`${ind1}<packname>${escapeXml(pack.packname || "")}</packname>`);
   out.push(`${ind1}<author>${escapeXml(pack.author || "")}</author>`);
+  if (pack.passwordHash) {
+    out.push(`${ind1}<password>${pack.passwordHash}</password>`);
+  }
 
   for (const lvl of pack.levels) {
     out.push(`${ind1}<Labyrinth>`);
@@ -378,7 +423,7 @@ const gh = {
   },
   pathFor(id) {
     const p = this.config.prefix ? this.config.prefix.replace(/^\/+|\/+$/g, "") + "/" : "";
-    return `${p}${id}.xml`;
+    return `${p}${idToFilename(id)}`;
   },
 
   async api(path, init = {}) {
@@ -408,11 +453,18 @@ const gh = {
     const out = [];
     for (const x of items) {
       if (x.type !== "file" || !/\.xml$/i.test(x.name)) continue;
-      const id = x.name.replace(/\.xml$/i, "");
+      const id = filenameToId(x.name);
       this.shaCache.set(id, x.sha);
-      out.push({ id, sha: x.sha, size: x.size });
+      out.push({ id, filename: x.name, sha: x.sha, size: x.size });
     }
-    out.sort((a, b) => a.id.localeCompare(b.id));
+    // Numeric IDs first (ascending), then named packs alphabetical.
+    out.sort((a, b) => {
+      const an = /^\d+$/.test(a.id), bn = /^\d+$/.test(b.id);
+      if (an && bn) return +a.id - +b.id;
+      if (an) return -1;
+      if (bn) return 1;
+      return a.id.localeCompare(b.id);
+    });
     return out;
   },
 
@@ -495,6 +547,7 @@ function utf8ToBase64(str) {
 // ----------------------- High-level open / save / new -----------------------
 function setLoaded(loaded) {
   state.loaded = loaded;
+  state.unlock = null;   // session password cache resets when pack changes
   syncLoadedIndicator();
   $("btn-save").disabled = !loaded;
 }
@@ -515,45 +568,77 @@ function syncLoadedIndicator() {
   el.classList.toggle("saved", !state.loaded.dirty && !state.loaded.isNew);
   el.classList.toggle("new",   !!state.loaded.isNew);
   const tag = state.loaded.isNew ? " (new)" : (state.loaded.dirty ? " •" : "");
-  $("loaded-name").textContent = state.loaded.id + tag;
+  $("loaded-name").textContent = "Pack " + state.loaded.id + tag;
 }
 
 function confirmDiscardDirty() {
   if (!state.loaded || !state.loaded.dirty) return true;
-  return window.confirm(`"${state.loaded.id}" has unsaved changes. Discard them?`);
+  return window.confirm(`Pack ${state.loaded.id} has unsaved changes. Discard them?`);
 }
 
-async function openPackById(id) {
-  id = String(id || "").trim();
+function applyLoadedPack(id, pack, sha, { isNew = false, dirty = false } = {}) {
+  state.pack = pack;
+  state.currentLevelIdx = 0;
+  state.selection = null;
+  history.past.length = 0;
+  history.future.length = 0;
+  setLoaded({ id, sha, isNew, dirty });
+  $("board").hidden = false;
+  $("board-empty").hidden = true;
+  $("board-coords").hidden = false;
+  syncAll();
+}
+
+async function openPackById(rawId) {
+  const id = String(rawId || "").trim();
   if (!id) { showToast("Enter a pack ID.", "error"); return; }
   if (!confirmDiscardDirty()) return;
   if (!gh.configured) { openSettings("Configure the GitHub repo first."); return; }
-  showToast(`Loading ${id}…`);
+  showToast(`Loading pack ${id}…`);
   try {
     const { xml, sha } = await gh.readPack(id);
     const pack = parsePack(xml);
-    state.pack = pack;
-    state.currentLevelIdx = 0;
-    state.selection = null;
-    history.past.length = 0;
-    history.future.length = 0;
-    setLoaded({ id, sha, isNew: false, dirty: false });
-    $("board").hidden = false;
-    $("board-empty").hidden = true;
-    $("board-coords").hidden = false;
-    syncAll();
-    showToast(`Opened ${id} (${pack.levels.length} level${pack.levels.length === 1 ? "" : "s"})`, "ok");
+    applyLoadedPack(id, pack, sha);
+    showToast(`Opened pack ${id} (${pack.levels.length} level${pack.levels.length === 1 ? "" : "s"})`, "ok");
   } catch (e) {
     console.error(e);
-    showToast(e.message || "Failed to open pack", "error");
+    if (e.status === 404) {
+      showToast(`Pack ${id} doesn't exist. Create it with "New…" or pick a different ID.`, "error");
+    } else {
+      showToast(e.message || "Failed to open pack", "error");
+    }
   }
 }
 
+// Save flow:
+//   1. If pack has passwordHash, require the matching password (cached per
+//      session for this pack ID so the user is only asked once).
+//   2. PUT the file via the GitHub Contents API.
 async function savePack() {
   if (!state.loaded) return;
   if (!gh.token) { openSettings("Paste a GitHub token to save."); return; }
+
+  if (state.pack.passwordHash) {
+    const cached = state.unlock
+                && state.unlock.id === state.loaded.id
+                && state.unlock.hash === state.pack.passwordHash;
+    if (!cached) {
+      const pwd = await promptPassword({
+        title: "Password required",
+        message: `Pack ${state.loaded.id} is protected by the author. Enter the password to save your changes.`,
+        verifyHash: state.pack.passwordHash,
+      });
+      if (pwd == null) return; // cancelled
+      state.unlock = { id: state.loaded.id, hash: state.pack.passwordHash };
+    }
+  }
+
+  await doSaveCurrent();
+}
+
+async function doSaveCurrent() {
   const id = state.loaded.id;
-  showToast(`Saving ${id}…`);
+  showToast(`Saving pack ${id}…`);
   try {
     const xml = serializePack(state.pack);
     const { sha } = await gh.writePack(id, xml, state.loaded.sha, state.loaded.isNew);
@@ -561,37 +646,72 @@ async function savePack() {
     state.loaded.isNew = false;
     state.loaded.dirty = false;
     syncLoadedIndicator();
-    await refreshPackList(); // pick up the new file if it was a create
-    showToast(`Saved ${id} ✓`, "ok");
+    await refreshPackList();
+    showToast(`Saved pack ${id} ✓`, "ok");
   } catch (e) {
     console.error(e);
     if (e.status === 409) {
-      showToast(`Conflict: "${state.loaded.id}" was modified on GitHub since you opened it. Reopen to merge manually.`, "error");
+      showToast(`Conflict: pack ${state.loaded.id} was modified on GitHub since you opened it. Reload to merge manually.`, "error");
     } else if (e.status === 401 || e.status === 403) {
       showToast("Auth failed. Check that your token has Contents: read & write on this repo.", "error");
+    } else if (e.status === 422) {
+      showToast(`Pack ${state.loaded.id} already exists on the server. Pick a different ID.`, "error");
     } else {
       showToast(e.message || "Save failed", "error");
     }
   }
 }
 
-function createNewPack({ id, packname, author }) {
+// New-pack flow:
+//   1. Compute the next free numeric ID (≥ 500) from the server listing.
+//   2. Ask the author for name, optional password.
+//   3. Save immediately to reserve the ID (creator can't be sniped between
+//      open and first edit). If the chosen ID was racially taken in the
+//      meantime, retry once with the next free.
+async function createNewPack({ id, packname, author, password }) {
   if (!id) { showToast("Pack ID required.", "error"); return; }
+  if (!gh.configured) { openSettings("Configure the GitHub repo first."); return; }
+  if (!gh.token) { openSettings("A GitHub token is needed to create a new pack."); return; }
   if (!confirmDiscardDirty()) return;
+
   const pack = emptyPack();
-  pack.packname = packname || id;
+  pack.packname = packname || `Pack ${id}`;
   pack.author = author || "";
-  state.pack = pack;
-  state.currentLevelIdx = 0;
-  state.selection = null;
-  history.past.length = 0;
-  history.future.length = 0;
-  setLoaded({ id, sha: null, isNew: true, dirty: true });
-  $("board").hidden = false;
-  $("board-empty").hidden = true;
-  $("board-coords").hidden = false;
-  syncAll();
-  showToast(`New pack "${id}" — click Save to commit.`, "ok");
+  if (password && password.length) {
+    pack.passwordHash = await sha256Hex(password);
+  }
+
+  let usedId = String(id);
+  let attempt = 0;
+  while (attempt < 4) {
+    try {
+      const xml = serializePack(pack);
+      const { sha } = await gh.writePack(usedId, xml, null, true);
+      applyLoadedPack(usedId, pack, sha);
+      // If the user set a password, they trivially "know" it for this session.
+      if (pack.passwordHash) {
+        state.unlock = { id: usedId, hash: pack.passwordHash };
+      }
+      await refreshPackList();
+      showToast(`Created pack ${usedId}`, "ok");
+      return;
+    } catch (e) {
+      if ((e.status === 422 || e.status === 409) && attempt < 3) {
+        // Someone else took this ID. Bump and retry.
+        const packs = await gh.listPacks();
+        usedId = String(getNextFreeNumericId(packs, +usedId + 1));
+        attempt++;
+        continue;
+      }
+      console.error(e);
+      if (e.status === 401 || e.status === 403) {
+        showToast("Auth failed. Check that your token has Contents: read & write on this repo.", "error");
+      } else {
+        showToast(e.message || "Could not create pack", "error");
+      }
+      return;
+    }
+  }
 }
 
 // ----------------------- Pack-picker UI -----------------------
@@ -645,34 +765,55 @@ $("btn-open").addEventListener("click", () => openPackById($("pack-id").value));
 $("btn-save").addEventListener("click", () => savePack());
 
 // ----------------------- New-pack modal -----------------------
-function openNewPack() {
-  const dlg = $("newpack-modal");
-  $("new-id").value = "";
+async function openNewPack() {
+  if (!gh.configured) { openSettings("Configure the GitHub repo first."); return; }
+  $("new-id").value = "(loading…)";
   $("new-name").value = "";
   $("new-author").value = "";
-  $("new-id-preview").textContent = `${gh.config.prefix || ""}/<id>.xml`;
-  dlg.hidden = false;
-  setTimeout(() => $("new-id").focus(), 0);
+  $("new-password").value = "";
+  updateNewIdPreview();
+  $("newpack-modal").hidden = false;
+  // Find the next free numeric ID ≥ 500 from the live listing.
+  try {
+    const packs = await gh.listPacks();
+    const nextId = getNextFreeNumericId(packs, 500);
+    $("new-id").value = String(nextId);
+    updateNewIdPreview();
+    setTimeout(() => $("new-name").focus(), 0);
+  } catch (e) {
+    console.error(e);
+    $("new-id").value = "500";
+    updateNewIdPreview();
+  }
+}
+
+function updateNewIdPreview() {
+  const v = $("new-id").value.trim() || "<id>";
+  const filename = /^\d+$/.test(v) ? `pack${v}.xml` : `${v}.xml`;
+  const prefix = (gh.config.prefix || "").replace(/^\/+|\/+$/g, "");
+  $("new-id-preview").textContent = prefix ? `${prefix}/${filename}` : filename;
 }
 
 $("btn-new-pack").addEventListener("click", openNewPack);
+$("new-id").addEventListener("input", updateNewIdPreview);
 
-$("new-id").addEventListener("input", (e) => {
-  const v = e.target.value.trim() || "<id>";
-  $("new-id-preview").textContent = `${gh.config.prefix || ""}/${v}.xml`;
-});
-
-$("new-create").addEventListener("click", () => {
+$("new-create").addEventListener("click", async () => {
   const id = $("new-id").value.trim();
-  if (!/^[A-Za-z0-9_\-]+$/.test(id)) {
-    showToast("Pack ID can only use letters, digits, _ and -", "error");
+  if (!/^\d+$/.test(id)) {
+    showToast("Pack ID must be a positive number.", "error");
     return;
   }
+  if (+id < 1) {
+    showToast("Pack ID must be ≥ 1.", "error");
+    return;
+  }
+  const password = $("new-password").value;
   closeModals();
-  createNewPack({
+  await createNewPack({
     id,
     packname: $("new-name").value.trim(),
     author: $("new-author").value.trim(),
+    password: password || null,
   });
 });
 
@@ -756,9 +897,140 @@ $("cfg-save").addEventListener("click", async () => {
   await refreshPackList();
 });
 
+// ----------------------- Password prompt modal -----------------------
+// Returns a Promise that resolves with the password the user typed (after we
+// verify it matches `verifyHash`), or null if cancelled.
+let passwordPromptResolve = null;
+function promptPassword({ title, message, verifyHash, requireMatch = true }) {
+  return new Promise((resolve) => {
+    passwordPromptResolve = resolve;
+    $("pp-title").textContent = title || "Password required";
+    $("pp-message").textContent = message || "";
+    $("pp-input").value = "";
+    $("pp-error").textContent = "";
+    $("pp-modal").dataset.verifyHash = verifyHash || "";
+    $("pp-modal").dataset.requireMatch = requireMatch ? "1" : "";
+    $("pp-modal").hidden = false;
+    setTimeout(() => $("pp-input").focus(), 0);
+  });
+}
+
+async function submitPasswordPrompt() {
+  const dlg = $("pp-modal");
+  const pwd = $("pp-input").value;
+  const expected = dlg.dataset.verifyHash;
+  const requireMatch = !!dlg.dataset.requireMatch;
+  if (requireMatch && expected) {
+    const h = await sha256Hex(pwd);
+    if (h !== expected) {
+      $("pp-error").textContent = "Wrong password.";
+      $("pp-input").select();
+      return;
+    }
+  }
+  dlg.hidden = true;
+  const r = passwordPromptResolve; passwordPromptResolve = null;
+  if (r) r(pwd);
+}
+
+function cancelPasswordPrompt() {
+  $("pp-modal").hidden = true;
+  const r = passwordPromptResolve; passwordPromptResolve = null;
+  if (r) r(null);
+}
+
+$("pp-submit").addEventListener("click", submitPasswordPrompt);
+$("pp-cancel").addEventListener("click", cancelPasswordPrompt);
+$("pp-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitPasswordPrompt(); }
+});
+
+// ----------------------- Password management modal -----------------------
+function openManagePassword() {
+  if (!state.pack) return;
+  const hasPwd = !!state.pack.passwordHash;
+  $("pm-current-row").hidden = !hasPwd;
+  $("pm-current").value = "";
+  $("pm-new").value = "";
+  $("pm-confirm").value = "";
+  $("pm-error").textContent = "";
+  $("pm-title").textContent = hasPwd ? "Change password" : "Set password";
+  $("pm-help").textContent = hasPwd
+    ? "Enter the current password to change or remove protection. Leave New blank to remove."
+    : "Anyone with a GitHub token won't be able to save changes to this pack without this password.";
+  $("pm-modal").hidden = false;
+  setTimeout(() => (hasPwd ? $("pm-current") : $("pm-new")).focus(), 0);
+}
+
+async function submitManagePassword() {
+  if (!state.pack) return;
+  const hasPwd = !!state.pack.passwordHash;
+  const cur = $("pm-current").value;
+  const next = $("pm-new").value;
+  const conf = $("pm-confirm").value;
+  const errEl = $("pm-error");
+  errEl.textContent = "";
+
+  if (hasPwd) {
+    const h = await sha256Hex(cur);
+    if (h !== state.pack.passwordHash) {
+      errEl.textContent = "Current password is wrong.";
+      return;
+    }
+  }
+  if (next !== conf) {
+    errEl.textContent = "New password and confirmation don't match.";
+    return;
+  }
+
+  pushHistory();
+  if (!next.length) {
+    state.pack.passwordHash = null;
+    state.unlock = null;
+    showToast("Password removed. Save to commit.", "ok");
+  } else {
+    const h = await sha256Hex(next);
+    state.pack.passwordHash = h;
+    // The user clearly knows the new password — auto-unlock this session.
+    state.unlock = { id: state.loaded.id, hash: h };
+    showToast("Password set. Save to commit.", "ok");
+  }
+  syncPackSection();
+  $("pm-modal").hidden = true;
+}
+
+$("pm-submit").addEventListener("click", submitManagePassword);
+$("pm-cancel").addEventListener("click", () => { $("pm-modal").hidden = true; });
+
+// ----------------------- Sidebar pack section -----------------------
+function syncPackSection() {
+  if (!state.pack) {
+    $("pack-pwd-status").textContent = "—";
+    $("pack-pwd-status").className = "pwd-status";
+    $("pack-pwd-btn").disabled = true;
+    $("pack-pwd-btn").textContent = "Set…";
+    return;
+  }
+  $("pack-pwd-btn").disabled = false;
+  if (state.pack.passwordHash) {
+    $("pack-pwd-status").textContent = "🔒 Protected";
+    $("pack-pwd-status").className = "pwd-status pwd-status-locked";
+    $("pack-pwd-btn").textContent = "Change…";
+  } else {
+    $("pack-pwd-status").textContent = "🔓 No password";
+    $("pack-pwd-status").className = "pwd-status pwd-status-open";
+    $("pack-pwd-btn").textContent = "Set…";
+  }
+}
+
+$("pack-pwd-btn").addEventListener("click", openManagePassword);
+
 function closeModals() {
   $("settings-modal").hidden = true;
   $("newpack-modal").hidden = true;
+  $("pp-modal").hidden = true;
+  $("pm-modal").hidden = true;
+  if (passwordPromptResolve) { const r = passwordPromptResolve; passwordPromptResolve = null; r(null); }
 }
 
 document.querySelectorAll(".modal").forEach((m) => {
@@ -1619,6 +1891,7 @@ function syncAll() {
   syncLevelList();
   syncSelectionPanel();
   syncStats();
+  syncPackSection();
   if (state.pack) draw();
 }
 

@@ -14,11 +14,32 @@ GitHub Pages; the repo itself is the database.
 2. The first time, you'll be prompted for your GitHub repository and (for
    saving) a personal access token. Paste them in the **Settings** dialog and
    click *Save settings*.
-3. Pick a pack from the dropdown — or type its ID and press **Open** — to
-   start editing. Use **New…** to create a brand-new pack.
-4. Edit, then click **Save** (or `⌘S` / `Ctrl+S`). A commit lands on the
-   configured branch with a message like
-   `Update packs/myPack.xml via Level Editor`.
+3. Either pick an existing pack from the dropdown / type its **numeric ID**
+   (e.g. `117`) into the input and click **Open** — or click **New…** to
+   create a brand-new pack. New packs are auto-assigned the next free
+   numeric ID ≥ 500 and saved immediately so the ID is reserved.
+4. Edit. If the pack is password-protected, **Save** will prompt for the
+   author's password the first time you save in a session. A commit lands on
+   the configured branch with a message like
+   `Update packs/pack517.xml via Level Editor`.
+
+### Pack passwords
+
+Each pack can be locked by its author with an optional **save password**:
+
+* Loading a pack never requires a password.
+* Saving back to GitHub does — the editor checks the password against the
+  hash stored in the pack's `<password>` element and only commits on a
+  match.
+* Use **Pack → Set… / Change…** in the left sidebar to set, change, or
+  remove the password. Changing or removing requires the current password.
+* The hash is SHA-256, stored in plain XML next to the pack metadata. It's
+  a soft "are you the author" gate, not real crypto — anyone with the pack
+  XML can copy and edit it locally, the password only blocks committing via
+  this editor.
+
+The iOS game silently ignores the `<password>` element (its XML parsers
+skip unknown elements at the `<Levelpack>` level).
 
 ## Creating a personal access token
 

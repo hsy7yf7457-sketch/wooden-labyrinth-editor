@@ -21,7 +21,7 @@
     <select id="pack-select" aria-label="Pack list">
       <option value="">— choose a pack —</option>
     </select>
-    <input id="pack-id" type="text" placeholder="…or type a pack ID" autocomplete="off" spellcheck="false" />
+    <input id="pack-id" type="text" placeholder="…or pack ID (e.g. 117)" autocomplete="off" spellcheck="false" inputmode="numeric" />
     <button id="btn-open" class="btn" type="button">Open</button>
   </div>
 
@@ -48,6 +48,13 @@
         <span>Author</span>
         <input id="pack-author" type="text" placeholder="Anonymous" />
       </label>
+      <div class="field pwd-field">
+        <span>Save password</span>
+        <div class="pwd-row">
+          <span id="pack-pwd-status" class="pwd-status">—</span>
+          <button id="pack-pwd-btn" class="btn btn-ghost btn-sm" type="button" disabled>Set…</button>
+        </div>
+      </div>
     </section>
 
     <section class="panel-section panel-section-grow">
@@ -253,9 +260,11 @@
     </header>
     <div class="modal-body">
       <label class="field">
-        <span>Pack ID (filename, no extension)</span>
-        <input id="new-id" type="text" placeholder="myCoolPack" autocomplete="off" spellcheck="false" />
-        <small class="muted">Becomes <code id="new-id-preview">packs/&lt;id&gt;.xml</code></small>
+        <span>Pack ID</span>
+        <input id="new-id" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
+        <small class="muted">
+          Next free ID, starting at 500. Becomes <code id="new-id-preview">packs/pack&lt;id&gt;.xml</code>.
+        </small>
       </label>
       <label class="field">
         <span>Pack name (shown in game)</span>
@@ -265,11 +274,73 @@
         <span>Author</span>
         <input id="new-author" type="text" placeholder="Your name" />
       </label>
+      <label class="field">
+        <span>Save password (optional)</span>
+        <input id="new-password" type="password" placeholder="Leave blank for an unprotected pack" autocomplete="new-password" />
+        <small class="muted">
+          If set, anyone editing this pack will need this password to save
+          their changes back. Loading the pack never requires the password.
+        </small>
+      </label>
     </div>
     <footer class="modal-footer">
       <div class="modal-footer-spacer"></div>
       <button class="btn btn-ghost" type="button" data-close>Cancel</button>
-      <button id="new-create" class="btn btn-primary" type="button">Create</button>
+      <button id="new-create" class="btn btn-primary" type="button">Create &amp; reserve ID</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============================== Password prompt modal ============================== -->
+<div id="pp-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card modal-card-sm">
+    <header class="modal-header">
+      <h2 id="pp-title">Password required</h2>
+    </header>
+    <div class="modal-body">
+      <p id="pp-message" class="muted"></p>
+      <label class="field">
+        <span>Password</span>
+        <input id="pp-input" type="password" autocomplete="current-password" />
+        <small id="pp-error" class="pwd-error"></small>
+      </label>
+    </div>
+    <footer class="modal-footer">
+      <div class="modal-footer-spacer"></div>
+      <button id="pp-cancel" class="btn btn-ghost" type="button">Cancel</button>
+      <button id="pp-submit" class="btn btn-primary" type="button">Unlock</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============================== Password manage modal ============================== -->
+<div id="pm-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card modal-card-sm">
+    <header class="modal-header">
+      <h2 id="pm-title">Set password</h2>
+    </header>
+    <div class="modal-body">
+      <p id="pm-help" class="muted"></p>
+      <div id="pm-current-row" class="field" hidden>
+        <span>Current password</span>
+        <input id="pm-current" type="password" autocomplete="current-password" />
+      </div>
+      <label class="field">
+        <span>New password</span>
+        <input id="pm-new" type="password" autocomplete="new-password" />
+      </label>
+      <label class="field">
+        <span>Confirm new password</span>
+        <input id="pm-confirm" type="password" autocomplete="new-password" />
+        <small id="pm-error" class="pwd-error"></small>
+      </label>
+    </div>
+    <footer class="modal-footer">
+      <div class="modal-footer-spacer"></div>
+      <button id="pm-cancel" class="btn btn-ghost" type="button">Cancel</button>
+      <button id="pm-submit" class="btn btn-primary" type="button">Apply</button>
     </footer>
   </div>
 </div>
