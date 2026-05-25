@@ -56,61 +56,85 @@
       </div>
     </section>
 
-    <section class="panel-section panel-section-grow">
-      <div class="section-header">
-        <h2>Levels</h2>
-        <div class="section-actions">
-          <button id="btn-add-level" class="icon-btn" type="button" title="Add level">+</button>
-          <button id="btn-dup-level" class="icon-btn" type="button" title="Duplicate level">⎘</button>
-          <button id="btn-del-level" class="icon-btn icon-btn-danger" type="button" title="Delete level">×</button>
-        </div>
-      </div>
-      <ol id="level-list" class="level-list"></ol>
-    </section>
   </aside>
 
   <section class="board-wrap" id="board-wrap">
-    <div class="toolbar">
-      <div class="tool-group" role="radiogroup" aria-label="Tool">
-        <button class="tool" data-tool="select" title="Select / move (V)">Select</button>
-        <button class="tool" data-tool="wall" title="Draw wall (W)">Wall</button>
-        <button class="tool" data-tool="hole" title="Place hole (H)">Hole</button>
-        <button class="tool" data-tool="start" title="Place start (S)">Start</button>
-        <button class="tool" data-tool="goal" title="Place goal (G)">Goal</button>
-      </div>
-      <div class="toolbar-spacer"></div>
-      <div class="tool-group">
-        <label class="check"><input id="opt-grid" type="checkbox" checked /> Grid</label>
-        <label class="check"><input id="opt-snap" type="checkbox" checked /> Snap</label>
-        <label class="field-inline">
-          <span>Step</span>
-          <select id="opt-step">
-            <option value="1">1 px</option>
-            <option value="2">2 px</option>
-            <option value="4">4 px</option>
-            <option value="8" selected>8 px</option>
-            <option value="16">16 px</option>
-          </select>
-        </label>
+
+    <!-- ============================== View 1: Empty (no pack) ============================== -->
+    <div id="board-empty" class="board-empty">
+      <div class="board-empty-card">
+        <h2>No pack open</h2>
+        <p>Pick a pack from the dropdown above, type its ID, or click <strong>New…</strong> to start a fresh pack.</p>
       </div>
     </div>
 
-    <div class="canvas-stage" id="canvas-stage">
-      <div id="board-empty" class="board-empty">
-        <div class="board-empty-card">
-          <h2>No pack open</h2>
-          <p>Pick a pack from the dropdown above, type its ID, or click <strong>New…</strong> to start a fresh pack.</p>
+    <!-- ============================== View 2: Pack overview ==============================
+      The 2x5 thumbnail grid that mirrors the in-game level select. Click a
+      tile to enter the level editor; drag tiles to rearrange the order.
+      A pack is always exactly 10 levels — there's no add/remove. -->
+    <div id="pack-overview" class="pack-overview" hidden>
+      <div class="overview-header">
+        <div>
+          <h2 id="overview-pack-name">Untitled Pack</h2>
+          <div class="muted" id="overview-pack-by">by Anonymous</div>
+        </div>
+        <div class="muted overview-hint">
+          Click a tile to edit it. Drag tiles to reorder the pack.
         </div>
       </div>
-      <canvas id="board" width="480" height="320" aria-label="Level board" hidden></canvas>
-      <div class="board-coords" id="board-coords" hidden>—</div>
+      <div class="level-grid" id="level-grid"></div>
     </div>
 
-    <div class="hint">
-      <strong>Tip:</strong> drag the corner handle to resize a wall. Press
-      <kbd>H</kbd> to toggle wall height (full / half). Arrows nudge selection
-      (<kbd>⇧</kbd> = 10 px). <kbd>D</kbd> duplicates, <kbd>⌫</kbd> deletes.
-      <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> undo / redo. <kbd>⌘S</kbd> saves to GitHub.
+    <!-- ============================== View 3: Level editor ============================== -->
+    <div id="level-editor" class="level-editor" hidden>
+      <div class="editor-header">
+        <button id="btn-back-to-pack" class="btn btn-ghost" type="button">← Back to pack</button>
+        <div class="editor-title">
+          Level <b id="cur-level-num">1</b> <span class="muted">/ 10</span>
+          <span class="editor-title-sep">·</span>
+          <span id="cur-level-title">Untitled</span>
+        </div>
+        <div class="editor-header-spacer"></div>
+        <button id="btn-prev-level" class="btn btn-ghost btn-sm" type="button" title="Previous level (←)">‹</button>
+        <button id="btn-next-level" class="btn btn-ghost btn-sm" type="button" title="Next level (→)">›</button>
+      </div>
+
+      <div class="toolbar">
+        <div class="tool-group" role="radiogroup" aria-label="Tool">
+          <button class="tool" data-tool="select" title="Select / move (V)">Select</button>
+          <button class="tool" data-tool="wall" title="Draw wall (W)">Wall</button>
+          <button class="tool" data-tool="hole" title="Place hole (H)">Hole</button>
+          <button class="tool" data-tool="start" title="Place start (S)">Start</button>
+          <button class="tool" data-tool="goal" title="Place goal (G)">Goal</button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="tool-group">
+          <label class="check"><input id="opt-grid" type="checkbox" checked /> Grid</label>
+          <label class="check"><input id="opt-snap" type="checkbox" checked /> Snap</label>
+          <label class="field-inline">
+            <span>Step</span>
+            <select id="opt-step">
+              <option value="1">1 px</option>
+              <option value="2">2 px</option>
+              <option value="4">4 px</option>
+              <option value="8" selected>8 px</option>
+              <option value="16">16 px</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="canvas-stage" id="canvas-stage">
+        <canvas id="board" width="480" height="320" aria-label="Level board"></canvas>
+        <div class="board-coords" id="board-coords">—</div>
+      </div>
+
+      <div class="hint">
+        <strong>Tip:</strong> drag the corner handle to resize a wall. Press
+        <kbd>H</kbd> to toggle wall height (full / half). Arrows nudge selection
+        (<kbd>⇧</kbd> = 10 px). <kbd>D</kbd> duplicates, <kbd>⌫</kbd> deletes.
+        <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> undo / redo. <kbd>⌘S</kbd> saves to GitHub.
+      </div>
     </div>
   </section>
 

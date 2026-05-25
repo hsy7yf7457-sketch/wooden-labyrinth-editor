@@ -47,6 +47,7 @@ const toast = $("toast");
 const state = {
   pack: null,                  // null = no pack open yet (see boardEmpty UI)
   loaded: null,                // { id, sha, isNew, dirty }
+  view: "empty",               // "empty" | "pack" | "level"
   currentLevelIdx: 0,
   tool: "select",
   selection: null,             // { kind, idx }
@@ -75,18 +76,18 @@ const assetsReady = Promise.all([
 ]);
 
 // ----------------------- Helpers -----------------------
+// Every pack always has exactly LEVELS_PER_PACK levels (the iOS game's level
+// select view is a fixed 2x5 grid). New levels start "empty" — just the start
+// ball and goal hole — and the user fills in walls/holes from there.
+const LEVELS_PER_PACK = 10;
+
 function emptyLevel() {
   return {
     name: "Untitled",
     partime: 30,
     devtime: 0,
     jump: false,
-    walls: [
-      { x: 8, y: 8,    width: 464, height: 8, size: 1 },
-      { x: 8, y: 304,  width: 464, height: 8, size: 1 },
-      { x: 8, y: 8,    width: 8,   height: 304, size: 1 },
-      { x: 464, y: 8,  width: 8,   height: 304, size: 1 },
-    ],
+    walls: [],
     holes: [],
     start: { x: 30,  y: 30,  width: DEFAULT_START_SIZE, height: DEFAULT_START_SIZE },
     goal:  { x: 418, y: 258, width: DEFAULT_GOAL_SIZE,  height: DEFAULT_GOAL_SIZE  },
@@ -94,12 +95,21 @@ function emptyLevel() {
 }
 
 function emptyPack() {
+  const levels = [];
+  for (let i = 0; i < LEVELS_PER_PACK; i++) levels.push(emptyLevel());
   return {
     packname: "My Pack",
     author: "Anonymous",
     passwordHash: null,     // optional SHA-256 hex of the author's password
-    levels: [emptyLevel()],
+    levels,
   };
+}
+
+// True if a level has no user content beyond the default start+goal (no walls,
+// no holes). Used to mark "untouched" tiles in the overview grid.
+function isLevelEmpty(lvl) {
+  return !lvl || ((!lvl.walls || lvl.walls.length === 0) &&
+                  (!lvl.holes || lvl.holes.length === 0));
 }
 
 // SHA-256 hex digest (Web Crypto). Used only for the editor-side "are you the
@@ -269,7 +279,11 @@ function parsePack(xmlText) {
     if (goalEl)  level.goal  = rect(goalEl);
     pack.levels.push(level);
   }
-  if (!pack.levels.length) pack.levels.push(emptyLevel());
+  // Always normalise to exactly LEVELS_PER_PACK. Pad short packs with empty
+  // levels; truncate the (extremely unlikely) over-long pack. Every shipped
+  // pack we've ever seen is exactly 10.
+  while (pack.levels.length < LEVELS_PER_PACK) pack.levels.push(emptyLevel());
+  if (pack.levels.length > LEVELS_PER_PACK) pack.levels.length = LEVELS_PER_PACK;
   return pack;
 }
 
@@ -586,9 +600,39 @@ function applyLoadedPack(id, pack, sha, { isNew = false, dirty = false } = {}) {
   history.past.length = 0;
   history.future.length = 0;
   setLoaded({ id, sha, isNew, dirty });
-  $("board").hidden = false;
-  $("board-empty").hidden = true;
-  $("board-coords").hidden = false;
+  // Always land in the pack overview when opening / creating a pack — the user
+  // explicitly picks a level from there to enter the editor.
+  setView("pack");
+  syncAll();
+}
+
+// ----------------------- View switching -----------------------
+// Three views share the centre column:
+//   "empty" — no pack open; shows the welcome card.
+//   "pack"  — pack overview (2x5 tile grid).
+//   "level" — single-level canvas editor.
+function setView(view) {
+  state.view = view;
+  document.body.dataset.view = view;
+  $("board-empty").hidden    = view !== "empty";
+  $("pack-overview").hidden  = view !== "pack";
+  $("level-editor").hidden   = view !== "level";
+  if (view === "level") {
+    // Canvas needs a real DPR-scaled backing buffer the first time it shows.
+    requestAnimationFrame(() => { if (state.pack) draw(); });
+  }
+}
+
+function enterLevel(idx) {
+  if (!state.pack) return;
+  state.currentLevelIdx = clamp(idx, 0, state.pack.levels.length - 1);
+  state.selection = null;
+  setView("level");
+  syncAll();
+}
+
+function backToPack() {
+  setView("pack");
   syncAll();
 }
 
@@ -1697,13 +1741,12 @@ $("level-name").addEventListener("input", (e) => {
   const lvl = currentLevel(); if (!lvl) return;
   lvl.name = e.target.value;
   markDirty();
-  syncLevelList();
+  syncEditorHeader();
 });
 $("level-partime").addEventListener("input", (e) => {
   const lvl = currentLevel(); if (!lvl) return;
   lvl.partime = +e.target.value || 0;
   markDirty();
-  syncLevelList();
 });
 $("level-devtime").addEventListener("input", (e) => {
   const lvl = currentLevel(); if (!lvl) return;
@@ -1789,64 +1832,192 @@ $("sel-wall-extra").querySelectorAll(".seg-btn").forEach((b) => {
 $("sel-dup").addEventListener("click", duplicateSelected);
 $("sel-del").addEventListener("click", deleteSelected);
 
-// ----------------------- Level list / pack ops -----------------------
-function syncLevelList() {
-  const ol = $("level-list");
-  ol.innerHTML = "";
+// ----------------------- Pack overview (2x5 thumbnail grid) -----------------------
+// Renders the 10 level tiles. Each tile owns a small <canvas> that draws a
+// scaled-down preview of the level. The tile root is HTML5-draggable; dropping
+// it on another tile swaps the two levels' positions in the pack.
+function syncPackOverview() {
+  const grid = $("level-grid");
+  grid.innerHTML = "";
   if (!state.pack) return;
+  $("overview-pack-name").textContent = state.pack.packname || "Untitled Pack";
+  $("overview-pack-by").textContent   = state.pack.author
+    ? `by ${state.pack.author}` : "(no author)";
+
   state.pack.levels.forEach((lvl, i) => {
-    const li = document.createElement("li");
-    if (i === state.currentLevelIdx) li.classList.add("active");
-    li.innerHTML = `<span class="idx">${i + 1}</span>
-                    <span class="name"></span>
-                    <span class="meta">${lvl.walls.length}w · ${lvl.holes.length}h</span>`;
-    li.querySelector(".name").textContent = lvl.name || "Untitled";
-    li.addEventListener("click", () => {
-      if (state.currentLevelIdx === i) return;
-      pushHistory();
-      state.currentLevelIdx = i;
-      state.selection = null;
-      syncAll();
+    const tile = document.createElement("div");
+    tile.className = "level-tile";
+    tile.draggable = true;
+    tile.dataset.idx = String(i);
+    if (isLevelEmpty(lvl)) tile.classList.add("tile-empty");
+
+    const head = document.createElement("div");
+    head.className = "tile-head";
+    head.innerHTML = `<span class="tile-num">${i + 1}</span>` +
+                     (isLevelEmpty(lvl)
+                       ? `<span class="tile-empty-badge">empty</span>`
+                       : "");
+
+    const thumbWrap = document.createElement("div");
+    thumbWrap.className = "tile-thumb";
+    const thumb = document.createElement("canvas");
+    // Render at a moderate resolution; CSS scales it to tile width.
+    const TW = 240, TH = 160;
+    thumb.width = TW;
+    thumb.height = TH;
+    thumbWrap.appendChild(thumb);
+
+    const name = document.createElement("div");
+    name.className = "tile-name";
+    name.textContent = lvl.name || "Untitled";
+
+    const meta = document.createElement("div");
+    meta.className = "tile-meta";
+    meta.innerHTML =
+      `<span>${lvl.walls.length}w · ${lvl.holes.length}h</span>` +
+      `<span>par ${fmtPar(lvl.partime)}s</span>`;
+
+    tile.appendChild(head);
+    tile.appendChild(thumbWrap);
+    tile.appendChild(name);
+    tile.appendChild(meta);
+    grid.appendChild(tile);
+
+    drawLevelThumb(thumb, lvl);
+
+    tile.addEventListener("click", (e) => {
+      // Don't enter the editor at the tail end of a drag.
+      if (tile.classList.contains("dragging")) return;
+      enterLevel(i);
     });
-    ol.appendChild(li);
+
+    wireTileDnd(tile);
   });
 }
 
-$("btn-add-level").addEventListener("click", () => {
-  if (!state.pack) return;
-  pushHistory();
-  state.pack.levels.push(emptyLevel());
-  state.currentLevelIdx = state.pack.levels.length - 1;
-  state.selection = null;
-  syncAll();
-});
+let dragSrcIdx = null;
+function wireTileDnd(tile) {
+  tile.addEventListener("dragstart", (e) => {
+    dragSrcIdx = +tile.dataset.idx;
+    tile.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    // Some browsers won't fire dragstart at all unless something is set.
+    try { e.dataTransfer.setData("text/plain", String(dragSrcIdx)); } catch (_) {}
+  });
+  tile.addEventListener("dragend", () => {
+    tile.classList.remove("dragging");
+    document.querySelectorAll(".level-tile.drop-target")
+      .forEach((t) => t.classList.remove("drop-target"));
+    dragSrcIdx = null;
+  });
+  tile.addEventListener("dragenter", (e) => {
+    if (dragSrcIdx == null) return;
+    if (+tile.dataset.idx === dragSrcIdx) return;
+    e.preventDefault();
+    tile.classList.add("drop-target");
+  });
+  tile.addEventListener("dragover", (e) => {
+    if (dragSrcIdx == null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  });
+  tile.addEventListener("dragleave", () => {
+    tile.classList.remove("drop-target");
+  });
+  tile.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const dst = +tile.dataset.idx;
+    const src = dragSrcIdx;
+    tile.classList.remove("drop-target");
+    if (src == null || dst === src) return;
+    pushHistory();
+    // Move src → dst (shift everything in between). Matches what users expect
+    // from drag-to-reorder more naturally than a straight swap.
+    const arr = state.pack.levels;
+    const [moved] = arr.splice(src, 1);
+    arr.splice(dst, 0, moved);
+    // Keep the editor's current level pointer following the moved tile if it
+    // happened to be the one being edited.
+    if (state.currentLevelIdx === src) state.currentLevelIdx = dst;
+    else if (src < state.currentLevelIdx && dst >= state.currentLevelIdx) state.currentLevelIdx--;
+    else if (src > state.currentLevelIdx && dst <= state.currentLevelIdx) state.currentLevelIdx++;
+    syncAll();
+  });
+}
 
-$("btn-dup-level").addEventListener("click", () => {
-  if (!state.pack) return;
-  pushHistory();
-  const copy = clone(currentLevel());
-  copy.name = (copy.name || "Untitled") + " (copy)";
-  state.pack.levels.splice(state.currentLevelIdx + 1, 0, copy);
-  state.currentLevelIdx++;
-  state.selection = null;
-  syncAll();
-});
+// Tiny renderer for the overview tiles. Doesn't bother with the textures or
+// nice gradients — just enough to recognise the level layout.
+function drawLevelThumb(canvas, lvl) {
+  const c = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  // Plain wood-tone background; could swap to a tiled texture later.
+  const bg = c.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#a0744a");
+  bg.addColorStop(1, "#6e4a2c");
+  c.fillStyle = bg;
+  c.fillRect(0, 0, W, H);
 
-$("btn-del-level").addEventListener("click", () => {
-  if (!state.pack) return;
-  if (state.pack.levels.length <= 1) {
-    showToast("Pack must have at least one level.", "error");
-    return;
+  // Map board (BOARD_W x BOARD_H) → canvas (W x H).
+  const sx = W / BOARD_W, sy = H / BOARD_H;
+  const px = (n) => n * sx;
+  const py = (n) => n * sy;
+
+  // Walls
+  for (const w of lvl.walls) {
+    c.fillStyle = w.size === 0.5 ? "rgba(60, 35, 20, 0.65)" : "#3a2515";
+    c.fillRect(px(w.x), py(w.y), px(w.width), py(w.height));
   }
-  const lvl = currentLevel();
-  if ((lvl.walls.length || lvl.holes.length) &&
-      !confirm(`Delete level "${lvl.name}"?`)) return;
-  pushHistory();
-  state.pack.levels.splice(state.currentLevelIdx, 1);
-  state.currentLevelIdx = Math.max(0, state.currentLevelIdx - 1);
-  state.selection = null;
-  syncAll();
+  // Holes
+  for (const h of lvl.holes) {
+    const cx = px(h.x + h.width / 2);
+    const cy = py(h.y + h.height / 2);
+    const r = Math.max(2, Math.min(px(h.width), py(h.height)) / 2);
+    c.fillStyle = "#0a0807";
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+  }
+  // Start (silver ball)
+  if (lvl.start) {
+    const cx = px(lvl.start.x + lvl.start.width / 2);
+    const cy = py(lvl.start.y + lvl.start.height / 2);
+    const r = Math.max(2, Math.min(px(lvl.start.width), py(lvl.start.height)) / 2);
+    const g = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.2, cx, cy, r);
+    g.addColorStop(0, "#fff");
+    g.addColorStop(1, "#5a5e62");
+    c.fillStyle = g;
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+  }
+  // Goal (checker square)
+  if (lvl.goal) {
+    const gx = px(lvl.goal.x), gy = py(lvl.goal.y);
+    const gw = px(lvl.goal.width), gh = py(lvl.goal.height);
+    const tile = Math.max(2, gw / 4);
+    for (let yy = 0; yy < gh; yy += tile) {
+      for (let xx = 0; xx < gw; xx += tile) {
+        const dark = ((Math.floor(xx / tile) + Math.floor(yy / tile)) % 2) === 0;
+        c.fillStyle = dark ? "#1a1a1a" : "#f4f4f4";
+        c.fillRect(gx + xx, gy + yy, tile, tile);
+      }
+    }
+  }
+}
+
+// ----------------------- Editor header (back, prev, next) -----------------------
+$("btn-back-to-pack").addEventListener("click", backToPack);
+$("btn-prev-level").addEventListener("click", () => {
+  if (!state.pack) return;
+  enterLevel((state.currentLevelIdx - 1 + LEVELS_PER_PACK) % LEVELS_PER_PACK);
 });
+$("btn-next-level").addEventListener("click", () => {
+  if (!state.pack) return;
+  enterLevel((state.currentLevelIdx + 1) % LEVELS_PER_PACK);
+});
+
+function syncEditorHeader() {
+  if (!state.pack) return;
+  const lvl = currentLevel();
+  $("cur-level-num").textContent = String(state.currentLevelIdx + 1);
+  $("cur-level-title").textContent = lvl?.name || "Untitled";
+}
 
 // ----------------------- Stats -----------------------
 function syncStats() {
@@ -1877,11 +2048,12 @@ function syncMeta() {
 
 function syncAll() {
   syncMeta();
-  syncLevelList();
+  syncPackOverview();
+  syncEditorHeader();
   syncSelectionPanel();
   syncStats();
   syncPackSection();
-  if (state.pack) draw();
+  if (state.pack && state.view === "level") draw();
 }
 
 // ----------------------- Keyboard -----------------------
@@ -1917,6 +2089,10 @@ window.addEventListener("keydown", (e) => {
   }
 
   if (!state.pack) return;
+
+  // Editor-only shortcuts (tools, nudges, delete). In pack view these
+  // would be no-ops at best, surprising at worst.
+  if (state.view !== "level") return;
 
   switch (e.key) {
     case "v": case "V": setTool("select"); break;
@@ -1981,6 +2157,7 @@ window.addEventListener("pageshow", (e) => {
 assetsReady.then(async () => {
   // Make sure nothing is showing from a hot-reload / bfcache restore.
   closeModals();
+  setView("empty");
 
   setTool("select");
   syncAll();

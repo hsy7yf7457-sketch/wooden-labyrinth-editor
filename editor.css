@@ -309,51 +309,175 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .check input { accent-color: var(--accent); }
 
-/* ---------- Level list ---------- */
-.level-list {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  overflow-y: auto;
+/* ---------- Pack overview (2x5 level grid) ----------
+   Mirrors the in-game level select view. Click a tile to enter the level
+   editor for it, or drag a tile onto another slot to swap their positions. */
+.pack-overview {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 22px 28px 28px;
+  overflow: auto;
+}
+.overview-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.overview-header h2 {
+  font-size: 22px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-0);
+  margin: 0 0 2px;
+}
+.overview-hint {
+  text-align: right;
+  max-width: 260px;
+  line-height: 1.5;
+}
+
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(2, auto);
+  gap: 16px;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  align-content: center;
+  flex: 1 1 auto;
+}
+
+.level-tile {
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #3b2c22, #2a1f17);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 10px 10px 8px;
+  cursor: pointer;
+  position: relative;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 220, 170, 0.05);
+  transition: transform 0.08s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.level-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--accent) inset;
+}
+.level-tile.dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+.level-tile.drop-target {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 2px var(--accent-2) inset, 0 8px 20px rgba(232, 177, 106, 0.25);
+}
+
+.tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.tile-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.tile-empty-badge {
+  color: var(--ink-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.tile-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #14100c;
+  border: 1px solid var(--line);
+}
+.tile-thumb canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.tile-empty .tile-thumb {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 220, 170, 0.025) 0 6px,
+      transparent 6px 12px
+    ),
+    #221a14;
+}
+
+.tile-name {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile-meta {
+  margin-top: 2px;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--ink-3);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---------- Level-editor view header ---------- */
+.level-editor {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
 }
-.level-list li {
+.editor-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 6px;
-  cursor: pointer;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #221a14, #1c150f);
+}
+.editor-title {
+  font-size: 13px;
   color: var(--ink-1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.level-list li:hover { background: rgba(255, 220, 170, 0.05); }
-.level-list li.active {
-  background: linear-gradient(180deg, #3b2c22, #2a1f17);
-  color: var(--ink-0);
-  box-shadow: 0 0 0 1px var(--line-strong) inset;
-}
-.level-list .idx {
-  flex: 0 0 auto;
-  width: 22px;
-  text-align: right;
-  color: var(--ink-3);
+.editor-title b {
   font-variant-numeric: tabular-nums;
-  font-family: var(--mono);
-  font-size: 11px;
+  color: var(--ink-0);
 }
-.level-list .name {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.level-list .meta {
-  flex: 0 0 auto;
-  color: var(--ink-3);
-  font-size: 11px;
-  font-family: var(--mono);
-}
+.editor-title-sep { color: var(--ink-3); padding: 0 2px; }
+.editor-header-spacer { flex: 1 1 auto; }
+.btn-sm { height: 26px; padding: 0 10px; font-size: 12px; }
+
+/* Pack/level-view-aware sidebar visibility:
+   - The right panel (Level / Selection / Stats) only makes sense when an
+     individual level is open. Hide it in the pack overview.
+   - Same for the per-level toolbar (it lives inside .level-editor already). */
+body[data-view="pack"]  .panel-right { display: none; }
+body[data-view="empty"] .panel-right { display: none; }
 
 /* ---------- Board ---------- */
 .board-wrap {
