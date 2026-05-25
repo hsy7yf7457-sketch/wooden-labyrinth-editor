@@ -35,5 +35,5 @@ jobs:
           npx wrangler deploy 2>&1 | tee /tmp/deploy.log
           node scripts/publish-url.mjs < /tmp/deploy.log
           if [ -n "$WORKER_GITHUB_TOKEN" ]; then
-            echo "$WORKER_GITHUB_TOKEN" | npx wrangler secret put GITHUB_TOKEN
+            printf '%s' "$WORKER_GITHUB_TOKEN" | npx wrangler secret put GITHUB_TOKEN
           fi
