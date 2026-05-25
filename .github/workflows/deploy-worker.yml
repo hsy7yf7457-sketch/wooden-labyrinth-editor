@@ -51,6 +51,10 @@ jobs:
             echo "WORKER_GITHUB_TOKEN cannot read packs/. Update the PAT to Contents: read and write on wooden-labyrinth-editor."
             exit 1
           fi
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/wl-editor-save/settings" \
+            | head -c 2000
+          echo
           npx wrangler deploy 2>&1 | tee /tmp/deploy.log
           node scripts/publish-url.mjs < /tmp/deploy.log
           WORKER_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)

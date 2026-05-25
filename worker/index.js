@@ -123,7 +123,19 @@ export default {
 
       // GET / — health + current origin
       if ((url.pathname === "/" || url.pathname === "/health") && request.method === "GET") {
-        return json({ ok: true, url: url.origin });
+        let githubOk = false;
+        const token = githubToken(env);
+        if (token) {
+          const gr = await fetch("https://api.github.com/user", {
+            headers: {
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          githubOk = gr.ok;
+        }
+        return json({ ok: true, url: url.origin, githubOk, hasToken: !!token });
       }
 
       // GET /register — write this worker's URL into save-api.json on GitHub
