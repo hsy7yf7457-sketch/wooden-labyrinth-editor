@@ -416,15 +416,20 @@ const gh = {
     return out;
   },
 
-  // Read via Pages-served URL when same-origin (fast); fall back to raw URL.
+  // Read via Pages-served URL when same-origin (fast, CDN-cached); fall back
+  // to the raw.githubusercontent.com URL for local dev or non-Pages hosts.
   async readPack(id) {
     if (!this.configured) throw new Error("Repo not configured.");
     const path = this.pathFor(id);
+    const sameOriginPages =
+      location.hostname.toLowerCase() === `${this.config.owner.toLowerCase()}.github.io` &&
+      location.pathname.split("/").filter(Boolean)[0] === this.config.repo;
     let xml;
-    if (location.hostname === `${this.config.owner.toLowerCase()}.github.io`) {
-      // Relative to /<repo>/level-editor/  →  /<repo>/<path>
-      const url = `../${path}?_=${Date.now()}`;
-      const res = await fetch(url, { cache: "no-store" });
+    if (sameOriginPages) {
+      // The editor and `packs/` ship together at the repo root, so the file
+      // lives next to index.html. Cache-bust so a fresh save is visible on
+      // the next reload.
+      const res = await fetch(`./${path}?_=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`Couldn't load "${id}": ${res.status} ${res.statusText}`);
       xml = await res.text();
     } else {
