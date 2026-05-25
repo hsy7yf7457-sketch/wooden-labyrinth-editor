@@ -791,11 +791,26 @@ body[data-view="empty"] .panel-right { display: none; }
   line-height: 1;
   letter-spacing: 0.04em;
 }
-.saved-hint {
+.save-hint {
   margin: 0;
   line-height: 1.5;
   text-align: center;
 }
+
+.save-server-status {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  background: #14100c;
+  color: var(--ink-2);
+}
+.save-server-status.warn { color: #e8c46a; border-color: #6e5a32; }
+.save-server-status.ok { color: var(--good); border-color: #3f6b46; }
+.save-server-status:hover { filter: brightness(1.08); }
 
 .status-row {
   display: flex;

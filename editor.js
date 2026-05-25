@@ -450,12 +450,83 @@ async function loadSaveApiUrl() {
 async function requireSaveApiUrl() {
   const url = await resolveSaveApiUrl();
   if (!url) {
-    throw Object.assign(new Error(
-      "Save server URL is not configured yet. In Cloudflare → Workers & Pages → wl-editor-save, " +
-      "click Visit, then add /register to the URL and reload this page."
-    ), { network: true });
+    throw Object.assign(new Error("Save server is not connected yet."), { needsSetup: true });
   }
   return url;
+}
+
+let saveSetupResolve = null;
+
+function openSaveSetupModal() {
+  return new Promise((resolve) => {
+    saveSetupResolve = resolve;
+    $("save-setup-url").value = localStorage.getItem("wlle.saveApi") || "";
+    $("save-setup-error").textContent = "";
+    $("save-setup-modal").hidden = false;
+    setTimeout(() => $("save-setup-url").focus(), 0);
+  });
+}
+
+function closeSaveSetupModal(result) {
+  $("save-setup-modal").hidden = true;
+  const r = saveSetupResolve;
+  saveSetupResolve = null;
+  if (r) r(result);
+}
+
+async function connectSaveServer(raw) {
+  let url = String(raw || "").trim().replace(/\/+$/, "");
+  if (!url) throw new Error("Paste the full URL from Cloudflare (Workers & Pages → wl-editor-save → Visit).");
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+  let health;
+  try {
+    health = await fetch(`${url}/health`, { cache: "no-store" });
+  } catch (_) {
+    throw new Error("Could not reach that URL. Copy it exactly from Cloudflare → Visit.");
+  }
+  if (!health.ok) {
+    throw new Error(`Save server returned ${health.status}. Is GITHUB_TOKEN set on the worker?`);
+  }
+  const hj = await health.json().catch(() => ({}));
+  if (hj.url) url = String(hj.url).replace(/\/+$/, "");
+
+  const reg = await fetch(`${url}/register`, { cache: "no-store" });
+  const rj = await reg.json().catch(() => ({}));
+  if (!reg.ok) {
+    throw new Error(rj.error || "Could not register save server (check GITHUB_TOKEN on the worker).");
+  }
+  if (rj.url) url = String(rj.url).replace(/\/+$/, "");
+
+  try { localStorage.setItem("wlle.saveApi", url); } catch (_) {}
+  _saveApiUrl = url;
+  _saveApiLoad = Promise.resolve(url);
+  syncSaveServerStatus();
+  return url;
+}
+
+async function ensureSaveServerConfigured() {
+  const url = await resolveSaveApiUrl();
+  if (url) return url;
+  const connected = await openSaveSetupModal();
+  if (!connected) throw Object.assign(new Error("Save cancelled."), { cancelled: true });
+  return connected;
+}
+
+function syncSaveServerStatus() {
+  const el = $("save-server-status");
+  if (!el) return;
+  resolveSaveApiUrl().then((url) => {
+    if (url) {
+      el.textContent = "Save: connected";
+      el.className = "save-server-status ok";
+      el.title = url;
+    } else {
+      el.textContent = "Save: not connected";
+      el.className = "save-server-status warn";
+      el.title = "Click to connect the save server";
+    }
+  });
 }
 
 function detectRepo() {
@@ -733,8 +804,12 @@ function downloadPackXml(suggestedId) {
 }
 
 function showSaveFailed(e, suggestedId) {
+  if (e?.needsSetup) {
+    openSaveSetupModal();
+    return;
+  }
   const msg = e?.network || /failed to fetch|could not reach/i.test(e?.message || "")
-    ? "Could not reach the save server. Online saving is not set up yet — download your pack as a backup."
+    ? "Could not reach the save server."
     : (e?.message || "Save failed");
   $("savefail-message").textContent = msg;
   $("savefail-modal").dataset.suggestedId = suggestedId != null ? String(suggestedId) : "";
@@ -760,12 +835,36 @@ $("savefail-download").addEventListener("click", () => {
   showToast("Pack downloaded", "ok", 2000);
 });
 $("savefail-ok").addEventListener("click", () => { $("savefail-modal").hidden = true; });
+
+$("save-setup-connect").addEventListener("click", async () => {
+  $("save-setup-error").textContent = "";
+  try {
+    const url = await connectSaveServer($("save-setup-url").value);
+    closeSaveSetupModal(url);
+    showToast("Save server connected", "ok", 2500);
+  } catch (e) {
+    $("save-setup-error").textContent = e.message || "Connection failed";
+  }
+});
+$("save-setup-cancel").addEventListener("click", () => closeSaveSetupModal(null));
+$("save-setup-url").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("save-setup-connect").click(); }
+});
+$("save-server-status")?.addEventListener("click", () => openSaveSetupModal());
 $("save-password").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); submitSaveModal(); }
 });
 
 async function savePack() {
   if (!state.loaded) return;
+
+  try {
+    await ensureSaveServerConfigured();
+  } catch (e) {
+    if (e.cancelled) return;
+    showSaveFailed(e);
+    return;
+  }
 
   // Existing protected pack — verify password first
   if (state.loaded.id != null && state.pack.passwordHash) {
@@ -921,6 +1020,7 @@ function closeModals() {
   $("save-modal").hidden = true;
   $("saved-modal").hidden = true;
   $("savefail-modal").hidden = true;
+  closeSaveSetupModal(null);
   if (saveModalResolve) { const r = saveModalResolve; saveModalResolve = null; r(null); }
 }
 
@@ -933,7 +1033,8 @@ document.querySelectorAll(".modal").forEach((m) => {
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     const open = !$("newpack-modal").hidden || !$("save-modal").hidden
-              || !$("saved-modal").hidden || !$("savefail-modal").hidden;
+              || !$("saved-modal").hidden || !$("savefail-modal").hidden
+              || !$("save-setup-modal").hidden;
     if (open) {
       closeModals();
       e.stopImmediatePropagation();
@@ -2040,5 +2141,6 @@ assetsReady.then(() => {
 
   setTool("select");
   syncAll();
+  syncSaveServerStatus();
   history.past.length = 0;
 });

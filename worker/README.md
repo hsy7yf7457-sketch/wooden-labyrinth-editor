@@ -2,38 +2,34 @@
 
 Players save packs through this Cloudflare Worker so they never need a GitHub token.
 
-If Save shows **“Could not reach the save server”**, this worker has not been deployed yet.
-
 ## One-time setup (GitHub Actions — recommended)
 
-1. Create a free [Cloudflare account](https://dash.cloudflare.com/sign-up).
-2. Create a Cloudflare API token with **Workers Scripts: Edit** permission.
-3. Copy your Cloudflare **Account ID** from the dashboard sidebar.
-4. Create a fine-grained GitHub PAT with **Contents: read & write** on `wooden-labyrinth-editor`.
-5. Add these **repository secrets** on GitHub (`Settings → Secrets → Actions`):
-   - `CLOUDFLARE_API_TOKEN`
-   - `CLOUDFLARE_ACCOUNT_ID`
-   - `WORKER_GITHUB_TOKEN` (the PAT from step 4)
-6. Open **Actions → Deploy save worker → Run workflow** (or push any change under `worker/`).
+Add three **repository secrets** so deploys run from GitHub (no tokens in chat):
 
-The worker URL will be `https://wl-editor-save.<your-cloudflare-subdomain>.workers.dev`.
+https://github.com/hsy7yf7457-sketch/wooden-labyrinth-editor/settings/secrets/actions
 
-After the first deploy, open that URL with **`/register`** appended once (while `GITHUB_TOKEN` is set on the worker). That writes the URL into `save-api.json` in the repo so the editor finds it automatically.
+| Secret | Value |
+|--------|--------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with **Workers Scripts: Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages → **Account ID** (right sidebar) |
+| `WORKER_GITHUB_TOKEN` | Fine-grained GitHub PAT on **wooden-labyrinth-editor** with **Contents: read & write** |
 
-If that differs from a URL stored in the browser, clear it:
+Create the Cloudflare token: https://dash.cloudflare.com/profile/api-tokens → **Create Token** → **Edit Cloudflare Workers** template (or custom with Workers Scripts Edit).
 
-```js
-localStorage.removeItem("wlle.saveApi");
-```
+Create the GitHub PAT: https://github.com/settings/tokens?type=beta → fine-grained → repo **wooden-labyrinth-editor** only.
 
-## Manual deploy
+When all three secrets exist, say **“secrets are set”** in the editor chat — the agent will run **Deploy save worker** from Actions. That will:
 
-```bash
-cd worker
-npm install
-wrangler login
-wrangler secret put GITHUB_TOKEN   # paste a GitHub PAT with Contents write
-wrangler deploy
-```
+1. Deploy `wl-editor-save` to Cloudflare
+2. Write the real `workers.dev` URL into `save-api.json`
+3. Upload `GITHUB_TOKEN` to the worker runtime
 
-The editor POSTs to `{SAVE_API_URL}/save` and GETs `{SAVE_API_URL}/packs`.
+## Manual fallback (Cloudflare dashboard)
+
+If you already deployed via Cloudflare’s GitHub integration:
+
+1. Add secret **`GITHUB_TOKEN`** on the worker (Settings → Variables and Secrets)
+2. Set deploy command: `npm install && npm run deploy`
+3. Retry the build, or paste the **Visit** URL once in the editor’s “Connect save server” dialog
+
+The editor POSTs to `{url from save-api.json}/save` and GETs `{url}/packs`.

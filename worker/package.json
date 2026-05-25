@@ -2,6 +2,9 @@
   "name": "wl-editor-save",
   "private": true,
   "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy 2>&1 | tee /tmp/wrangler-deploy.log; node scripts/publish-url.mjs < /tmp/wrangler-deploy.log"
+  },
   "devDependencies": {
     "wrangler": "^4.94.0"
   }

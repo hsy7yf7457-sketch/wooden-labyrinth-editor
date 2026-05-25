@@ -80,7 +80,25 @@ async function writeSaveApiConfig(request, env) {
     method: "PUT",
     body: JSON.stringify(payload),
   });
-  return json({ ok: true, url: origin });
+  return origin;
+}
+
+async function ensureRegistered(request, env) {
+  if (!env.GITHUB_TOKEN) return;
+  const origin = new URL(request.url).origin;
+  try {
+    const meta = await ghFetch(
+      env,
+      `/contents/save-api.json?ref=${encodeURIComponent(env.GITHUB_BRANCH || "main")}`
+    );
+    const json = JSON.parse(
+      decodeURIComponent(escape(atob(meta.content.replace(/\s/g, ""))))
+    );
+    if (json.url === origin) return;
+  } catch (e) {
+    if (e.status !== 404) return;
+  }
+  await writeSaveApiConfig(request, env);
 }
 
 export default {
@@ -96,14 +114,17 @@ export default {
         return json({ error: "GITHUB_TOKEN secret is not set on this worker" }, 503);
       }
 
-      // GET / — health + current origin (helps find the worker URL)
+      await ensureRegistered(request, env);
+
+      // GET / — health + current origin
       if ((url.pathname === "/" || url.pathname === "/health") && request.method === "GET") {
         return json({ ok: true, url: url.origin });
       }
 
       // GET /register — write this worker's URL into save-api.json on GitHub
       if (url.pathname === "/register" && request.method === "GET") {
-        return writeSaveApiConfig(request, env);
+        const origin = await writeSaveApiConfig(request, env);
+        return json({ ok: true, url: origin });
       }
 
       // GET /packs — list pack XML files (for next-free-ID)

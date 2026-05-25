@@ -20,24 +20,20 @@ jobs:
           cache: npm
           cache-dependency-path: worker/package-lock.json
 
-      - name: Install Wrangler
-        working-directory: worker
-        run: npm ci || npm install
-
-      - name: Deploy worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: worker
-          command: deploy
-
-      - name: Upload GitHub token to worker
+      - name: Deploy worker and publish save URL
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ secrets.WORKER_GITHUB_TOKEN }}
+          GITHUB_OWNER: hsy7yf7457-sketch
+          GITHUB_REPO: wooden-labyrinth-editor
+          GITHUB_BRANCH: main
           WORKER_GITHUB_TOKEN: ${{ secrets.WORKER_GITHUB_TOKEN }}
         run: |
+          npm ci || npm install
+          npx wrangler deploy 2>&1 | tee /tmp/deploy.log
+          node scripts/publish-url.mjs < /tmp/deploy.log
           if [ -n "$WORKER_GITHUB_TOKEN" ]; then
             echo "$WORKER_GITHUB_TOKEN" | npx wrangler secret put GITHUB_TOKEN
           fi

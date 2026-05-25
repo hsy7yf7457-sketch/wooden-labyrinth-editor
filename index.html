@@ -32,6 +32,7 @@
   </div>
 
   <div class="topbar-actions">
+    <button id="save-server-status" class="save-server-status warn" type="button" title="Connect save server">Save: not connected</button>
     <span id="loaded-indicator" class="loaded-indicator" hidden>
       <span class="dot"></span>
       <span id="loaded-name">no pack</span>
@@ -292,10 +293,6 @@
     </header>
     <div class="modal-body">
       <p id="savefail-message" class="muted"></p>
-      <p class="muted saved-hint" style="margin-top:10px">
-        First-time setup: Cloudflare → <b>wl-editor-save</b> → Visit → add <b>/register</b> to the URL.
-        Reload the editor, then save again.
-      </p>
     </div>
     <footer class="modal-footer">
       <button id="savefail-download" class="btn btn-ghost" type="button">Download XML</button>
@@ -305,8 +302,34 @@
   </div>
 </div>
 
+<!-- ============================== Connect save server (one-time) ============================== -->
+<div id="save-setup-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card modal-card-sm">
+    <header class="modal-header">
+      <h2>Connect save server</h2>
+    </header>
+    <div class="modal-body">
+      <p class="muted">
+        In Cloudflare, open <b>Workers &amp; Pages → wl-editor-save</b>, click <b>Visit</b>,
+        and copy the full URL from your browser's address bar. Paste it here once.
+      </p>
+      <label class="field" style="margin-top:12px">
+        <span>Worker URL</span>
+        <input id="save-setup-url" type="url" placeholder="https://wl-editor-save…..workers.dev" autocomplete="off" spellcheck="false" />
+        <small id="save-setup-error" class="pwd-error"></small>
+      </label>
+    </div>
+    <footer class="modal-footer">
+      <button id="save-setup-cancel" class="btn btn-ghost" type="button">Cancel</button>
+      <div class="modal-footer-spacer"></div>
+      <button id="save-setup-connect" class="btn btn-primary" type="button">Connect</button>
+    </footer>
+  </div>
+</div>
+
 <div id="toast" class="toast" hidden></div>
 
-<script src="editor.js?v=12" defer></script>
+<script src="editor.js?v=13" defer></script>
 </body>
 </html>
