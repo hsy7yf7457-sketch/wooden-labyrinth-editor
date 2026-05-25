@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>
+(function () {
+  var p = location.pathname;
+  if (!p.endsWith("/")) p = (/\.[^/]+$/.test(p) ? p.replace(/\/[^/]+$/, "/") : p + "/");
+  var b = document.createElement("base");
+  b.href = p;
+  document.head.appendChild(b);
+})();
+</script>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Wooden Labyrinth — Level Editor</title>
@@ -268,6 +277,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="editor.js" defer></script>
+<script src="editor.js?v=2" defer></script>
 </body>
 </html>

@@ -32,6 +32,23 @@ const DEFAULT_GOAL_SIZE = 32;
 const MIN_WALL = 4;
 const HISTORY_LIMIT = 100;
 
+// Resolve paths from this script's folder (reliable on GitHub Pages subpaths).
+const EDITOR_BASE = (() => {
+  const el = document.querySelector('script[src*="editor.js"]');
+  if (el?.src) return new URL(".", el.src).href;
+  return new URL("./", location.href).href;
+})();
+
+function assetUrl(path) {
+  return new URL(path, EDITOR_BASE).href;
+}
+
+function packUrl(id) {
+  const u = new URL(`packs/${idToFilename(id)}`, EDITOR_BASE);
+  u.searchParams.set("_", Date.now());
+  return u.href;
+}
+
 const HANDLE_HIT = 8;        // logical-pixel hit radius for resize handles
 const HANDLE_DRAW = 6;       // visual handle size
 
@@ -69,10 +86,10 @@ function loadImage(name, src) {
   });
 }
 const assetsReady = Promise.all([
-  loadImage("frame", "assets/wood-frame.jpg"),
-  loadImage("board", "assets/wood-board.png"),
-  loadImage("strip", "assets/wood-strip.jpg"),
-  loadImage("hole",  "assets/hole.png"),
+  loadImage("frame", assetUrl("assets/wood-frame.jpg")),
+  loadImage("board", assetUrl("assets/wood-board.png")),
+  loadImage("strip", assetUrl("assets/wood-strip.jpg")),
+  loadImage("hole",  assetUrl("assets/hole.png")),
 ]);
 
 // ----------------------- Helpers -----------------------
@@ -177,12 +194,12 @@ function snapRect(r) {
   };
 }
 
-function showToast(msg, kind = "") {
+function showToast(msg, kind = "", ms = 2200) {
   toast.textContent = msg;
   toast.className = "toast" + (kind ? " " + kind : "");
   toast.hidden = false;
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => { toast.hidden = true; }, 2200);
+  showToast._t = setTimeout(() => { toast.hidden = true; }, ms);
 }
 
 // ----------------------- History -----------------------
@@ -422,19 +439,14 @@ const gh = {
   },
 
   async readPack(id) {
-    const path = this.pathFor(id);
-    const url = `./${path}?_=${Date.now()}`;
+    const url = packUrl(id);
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw Object.assign(new Error(`Couldn't load pack ${id}: ${res.status}`), { status: res.status });
     const xml = await res.text();
-    let sha = this.shaCache.get(String(id)) || null;
-    if (!sha && SAVE_API_URL) {
-      try {
-        const meta = await saveApi.getSha(path);
-        sha = meta.sha;
-        if (sha) this.shaCache.set(String(id), sha);
-      } catch (_) {}
+    if (!/^\s*</.test(xml)) {
+      throw Object.assign(new Error("No pack found."), { status: 404 });
     }
+    const sha = this.shaCache.get(String(id)) || null;
     return { xml, sha };
   },
 
@@ -563,10 +575,16 @@ function backToPack() {
 
 async function openPackById(rawId) {
   const id = String(rawId || "").trim();
-  if (!id) { showToast("Enter a pack ID.", "error"); return; }
-  if (!isNumericId(id)) { showToast("Pack ID must be a number.", "error"); return; }
+  if (!id) { showToast("Enter a pack ID.", "error", 3500); return; }
+  if (!isNumericId(id)) { showToast("Pack ID must be a number.", "error", 3500); return; }
   if (!confirmDiscardDirty()) return;
+
+  const btn = $("btn-open");
+  const prevLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Opening…";
   showToast(`Loading pack ${id}…`);
+
   try {
     const { xml, sha } = await gh.readPack(id);
     const pack = parsePack(xml);
@@ -575,10 +593,13 @@ async function openPackById(rawId) {
   } catch (e) {
     console.error(e);
     if (e.status === 404) {
-      showToast("No pack found.", "error");
+      showToast("No pack found.", "error", 4000);
     } else {
-      showToast(e.message || "Failed to open pack", "error");
+      showToast(e.message || "Failed to open pack", "error", 4000);
     }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
   }
 }
 
