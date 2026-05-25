@@ -1970,16 +1970,26 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
+// Belt-and-suspenders: if the browser restores us from bfcache (Safari and
+// Chrome do this on back/forward, sometimes on reload), the previous DOM
+// state — including any modal that happened to be open — is reinstated.
+// Slam every modal shut on restore so the user can never get stranded.
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) closeModals();
+});
+
 assetsReady.then(async () => {
+  // Make sure nothing is showing from a hot-reload / bfcache restore.
+  closeModals();
+
   setTool("select");
   syncAll();
   history.past.length = 0;
 
-  // Populate the dropdown if the repo is already configured (auto-detect from
-  // a GH Pages URL, or a previously-saved config).
+  // Auto-detect the GitHub repo from a Pages URL or restore previous config.
+  // No auto-modal on boot — the empty-board card invites the user to use
+  // Settings / New / Open themselves. Only fetch the listing if we can.
   if (gh.configured) {
     await refreshPackList();
-  } else {
-    openSettings("Welcome! Set your GitHub repository to get started.");
   }
 });
