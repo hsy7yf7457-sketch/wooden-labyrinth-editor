@@ -30,6 +30,7 @@ const DEFAULT_HOLE_SIZE = 32;
 const DEFAULT_START_SIZE = 30;
 const DEFAULT_GOAL_SIZE = 32;
 const MIN_WALL = 4;
+const MIN_HOLE = 8;
 const HISTORY_LIMIT = 100;
 
 // Resolve paths from this script's folder (reliable on GitHub Pages subpaths).
@@ -1071,10 +1072,9 @@ function drawWall(w, hovered, selected) {
 
 function drawHole(h, hovered, selected) {
   ctx.save();
-  // Outer dark hollow with metal rim
   const cx = h.x + h.width / 2;
   const cy = h.y + h.height / 2;
-  const rOuter = Math.min(h.width, h.height) / 2;
+  const rOuter = Math.max(MIN_HOLE, Math.min(h.width, h.height)) / 2;
 
   // Rim shadow
   ctx.beginPath();
@@ -1281,7 +1281,11 @@ function applyDrag(p) {
   } else if (d.kind === "resize") {
     const r = getSelectedRect();
     if (!r) return;
-    resizeFromHandle(r, d.originalRect, d.handle, p);
+    if (state.selection?.kind === "hole") {
+      resizeHoleFromHandle(r, d.originalRect, d.handle, p);
+    } else {
+      resizeFromHandle(r, d.originalRect, d.handle, p);
+    }
     draw();
     syncSelectionPanel();
   } else if (d.kind === "new-wall") {
@@ -1321,6 +1325,41 @@ function resizeFromHandle(r, orig, handle, p) {
   r.x = left; r.y = top;
   r.width = right - left;
   r.height = bottom - top;
+}
+
+// Holes are circular — keep width and height equal so resizing always changes size.
+function setHoleSize(r, size) {
+  const s = clamp(Math.max(MIN_HOLE, snap(size)), MIN_HOLE, Math.min(BOARD_W, BOARD_H));
+  const cx = r.x + r.width / 2;
+  const cy = r.y + r.height / 2;
+  r.width = s;
+  r.height = s;
+  r.x = clamp(Math.round(cx - s / 2), 0, BOARD_W - s);
+  r.y = clamp(Math.round(cy - s / 2), 0, BOARD_H - s);
+}
+
+function resizeHoleFromHandle(r, orig, handle, p) {
+  const sx = clamp(snap(p.x), 0, BOARD_W);
+  const sy = clamp(snap(p.y), 0, BOARD_H);
+  const ox = handle.includes("w") ? orig.x + orig.width : orig.x;
+  const oy = handle.includes("n") ? orig.y + orig.height : orig.y;
+
+  let size;
+  if (handle === "e" || handle === "w") {
+    size = Math.max(MIN_HOLE, snap(Math.abs(sx - ox)));
+  } else if (handle === "n" || handle === "s") {
+    size = Math.max(MIN_HOLE, snap(Math.abs(sy - oy)));
+  } else {
+    size = Math.max(MIN_HOLE, snap(Math.max(Math.abs(sx - ox), Math.abs(sy - oy))));
+  }
+  size = Math.min(size, BOARD_W, BOARD_H);
+
+  r.x = handle.includes("w") ? ox - size : ox;
+  r.y = handle.includes("n") ? oy - size : oy;
+  r.width = size;
+  r.height = size;
+  r.x = clamp(r.x, 0, BOARD_W - size);
+  r.y = clamp(r.y, 0, BOARD_H - size);
 }
 
 canvas.addEventListener("pointerdown", (e) => {
@@ -1538,8 +1577,15 @@ function syncSelectionPanel() {
   $("sel-kind-label").textContent = sel.kind.toUpperCase();
   $("sel-x").value = Math.round(r.x);
   $("sel-y").value = Math.round(r.y);
-  $("sel-w").value = Math.round(r.width);
-  $("sel-h").value = Math.round(r.height);
+  const isHole = sel.kind === "hole";
+  $("sel-w-label").textContent = isHole ? "Size" : "Width";
+  $("sel-h-field").hidden = isHole;
+  if (isHole) {
+    $("sel-w").value = Math.round(Math.max(r.width, r.height));
+  } else {
+    $("sel-w").value = Math.round(r.width);
+    $("sel-h").value = Math.round(r.height);
+  }
   $("sel-wall-extra").hidden = sel.kind !== "wall";
   if (sel.kind === "wall") {
     for (const b of $("sel-wall-extra").querySelectorAll(".seg-btn")) {
@@ -1556,12 +1602,21 @@ function bindSelectionField(id, prop) {
     if (!r) return;
     let v = +$(id).value;
     if (Number.isNaN(v)) v = 0;
+    if (state.selection?.kind === "hole" && (prop === "width" || prop === "height")) {
+      setHoleSize(r, v);
+      markDirty();
+      draw();
+      syncSelectionPanel();
+      syncStats();
+      return;
+    }
     if (prop === "width" || prop === "height") v = Math.max(MIN_WALL, v);
     if (prop === "x") v = clamp(v, 0, BOARD_W - r.width);
     if (prop === "y") v = clamp(v, 0, BOARD_H - r.height);
     if (prop === "width")  v = Math.min(v, BOARD_W - r.x);
     if (prop === "height") v = Math.min(v, BOARD_H - r.y);
     r[prop] = v;
+    markDirty();
     draw();
     syncStats();
   });
