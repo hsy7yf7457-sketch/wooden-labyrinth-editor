@@ -30,7 +30,7 @@ function apiRoot(env) {
 }
 
 function githubToken(env) {
-  return env.WLLE_GITHUB_TOKEN || env.GITHUB_TOKEN || "";
+  return env.WLLE_GITHUB_TOKEN || "";
 }
 
 async function ghFetch(env, path, init = {}) {
