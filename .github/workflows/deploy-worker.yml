@@ -33,9 +33,11 @@ jobs:
           command: deploy
 
       - name: Upload GitHub token to worker
-        if: ${{ secrets.WORKER_GITHUB_TOKEN != '' }}
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           WORKER_GITHUB_TOKEN: ${{ secrets.WORKER_GITHUB_TOKEN }}
-        run: echo "$WORKER_GITHUB_TOKEN" | npx wrangler secret put GITHUB_TOKEN
+        run: |
+          if [ -n "$WORKER_GITHUB_TOKEN" ]; then
+            echo "$WORKER_GITHUB_TOKEN" | npx wrangler secret put GITHUB_TOKEN
+          fi

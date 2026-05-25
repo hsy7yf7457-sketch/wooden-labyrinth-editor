@@ -417,13 +417,46 @@ function serializePack(pack) {
 //   Writes: public save API (Cloudflare Worker) — players never see tokens.
 // ===========================================================================
 
-const SAVE_API_URL = (() => {
+let _saveApiUrl = null;
+let _saveApiLoad = null;
+
+async function resolveSaveApiUrl(force = false) {
+  if (_saveApiUrl && !force) return _saveApiUrl;
+  if (!force) {
+    if (!_saveApiLoad) _saveApiLoad = loadSaveApiUrl();
+    _saveApiUrl = await _saveApiLoad;
+    return _saveApiUrl;
+  }
+  _saveApiLoad = loadSaveApiUrl();
+  _saveApiUrl = await _saveApiLoad;
+  return _saveApiUrl;
+}
+
+async function loadSaveApiUrl() {
+  try {
+    const r = await fetch(assetUrl("save-api.json") + "?_=" + Date.now(), { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.url) return String(j.url).replace(/\/$/, "");
+    }
+  } catch (_) {}
   try {
     const s = localStorage.getItem("wlle.saveApi");
     if (s) return s.replace(/\/$/, "");
   } catch (_) {}
-  return "https://wl-editor-save.hsy7yf7457-sketch.workers.dev";
-})();
+  return "";
+}
+
+async function requireSaveApiUrl() {
+  const url = await resolveSaveApiUrl();
+  if (!url) {
+    throw Object.assign(new Error(
+      "Save server URL is not configured yet. In Cloudflare → Workers & Pages → wl-editor-save, " +
+      "click Visit, then add /register to the URL and reload this page."
+    ), { network: true });
+  }
+  return url;
+}
 
 function detectRepo() {
   const host = location.hostname;
@@ -464,7 +497,6 @@ const gh = {
   },
 
   async listPacksOnServer() {
-    if (!SAVE_API_URL) return [];
     const data = await saveApi.listPacks();
     for (const p of data.packs || []) {
       this.shaCache.set(String(p.id), p.sha);
@@ -482,9 +514,10 @@ const gh = {
 
 const saveApi = {
   async listPacks() {
+    const base = await requireSaveApiUrl();
     let res;
     try {
-      res = await fetch(`${SAVE_API_URL}/packs`, { cache: "no-store" });
+      res = await fetch(`${base}/packs`, { cache: "no-store" });
     } catch (e) {
       throw Object.assign(new Error("Could not reach the save server"), { network: true, cause: e });
     }
@@ -496,9 +529,11 @@ const saveApi = {
   },
 
   async getSha(path) {
+    const base = await requireSaveApiUrl().catch(() => null);
+    if (!base) return { sha: null };
     let res;
     try {
-      res = await fetch(`${SAVE_API_URL}/sha?file=${encodeURIComponent(path)}`, { cache: "no-store" });
+      res = await fetch(`${base}/sha?file=${encodeURIComponent(path)}`, { cache: "no-store" });
     } catch (_) {
       return { sha: null };
     }
@@ -507,9 +542,10 @@ const saveApi = {
   },
 
   async save({ filename, xml, sha, isNew }) {
+    const base = await requireSaveApiUrl();
     let res;
     try {
-      res = await fetch(`${SAVE_API_URL}/save`, {
+      res = await fetch(`${base}/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ filename, xml, sha, isNew }),

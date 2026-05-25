@@ -16,11 +16,14 @@ If Save shows **“Could not reach the save server”**, this worker has not bee
    - `WORKER_GITHUB_TOKEN` (the PAT from step 4)
 6. Open **Actions → Deploy save worker → Run workflow** (or push any change under `worker/`).
 
-The worker URL will be `https://wl-editor-save.<your-cloudflare-subdomain>.workers.dev`.  
-If that differs from the URL hard-coded in `editor.js`, set it once in the browser console:
+The worker URL will be `https://wl-editor-save.<your-cloudflare-subdomain>.workers.dev`.
+
+After the first deploy, open that URL with **`/register`** appended once (while `GITHUB_TOKEN` is set on the worker). That writes the URL into `save-api.json` in the repo so the editor finds it automatically.
+
+If that differs from a URL stored in the browser, clear it:
 
 ```js
-localStorage.setItem("wlle.saveApi", "https://wl-editor-save.YOUR-SUBDOMAIN.workers.dev");
+localStorage.removeItem("wlle.saveApi");
 ```
 
 ## Manual deploy
