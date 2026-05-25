@@ -36,36 +36,30 @@ jobs:
           WORKER_GITHUB_TOKEN: ${{ secrets.WORKER_GITHUB_TOKEN }}
         run: |
           npm ci || npm install
-          if [ -n "$WORKER_GITHUB_TOKEN" ]; then
-            printf '%s' "$WORKER_GITHUB_TOKEN" | npx wrangler secret put WLLE_GITHUB_TOKEN
-          fi
           GH_CODE=$(curl -sS -o /tmp/gh-packs.json -w "%{http_code}" \
             -H "Authorization: Bearer $WORKER_GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/hsy7yf7457-sketch/wooden-labyrinth-editor/contents/packs?ref=main")
           echo "GitHub API /contents/packs: HTTP $GH_CODE"
-          head -c 120 /tmp/gh-packs.json
-          echo
           if [ "$GH_CODE" != "200" ]; then
             echo "WORKER_GITHUB_TOKEN cannot read packs/. Update the PAT to Contents: read and write on wooden-labyrinth-editor."
             exit 1
           fi
-          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/wl-editor-save/settings" \
-            | head -c 2000
-          echo
+          echo "PAT length: ${#WORKER_GITHUB_TOKEN}"
+          npx wrangler secret delete GITHUB_TOKEN 2>/dev/null || true
+          npx wrangler secret delete WLLE_GITHUB_TOKEN 2>/dev/null || true
+          node --input-type=module -e "import { writeFileSync } from 'node:fs'; writeFileSync('/tmp/wlle-secrets.json', JSON.stringify({ WLLE_GITHUB_TOKEN: process.env.WORKER_GITHUB_TOKEN }));"
+          npx wrangler secret bulk /tmp/wlle-secrets.json
+          rm -f /tmp/wlle-secrets.json
           npx wrangler deploy 2>&1 | tee /tmp/deploy.log
           node scripts/publish-url.mjs < /tmp/deploy.log
           WORKER_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
           echo "Worker URL: $WORKER_URL"
-          for i in 1 2 3 4 5; do
-            if curl -fsS "$WORKER_URL/packs" | grep -q '"packs"'; then
-              echo "Worker /packs OK"
-              exit 0
-            fi
-            echo "Waiting for worker /packs (attempt $i)..."
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            HEALTH=$(curl -sS "$WORKER_URL/health")
+            echo "Health: $HEALTH"
+            echo "$HEALTH" | grep -q '"githubOk":true' && echo "Worker GitHub auth OK" && exit 0
             sleep 3
           done
-          curl -sS "$WORKER_URL/packs"
           exit 1
