@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Wooden Labyrinth — Level Editor</title>
+<link rel="stylesheet" href="editor.css" />
+<link rel="icon" href="assets/hole.png" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark"></span>
+    <div>
+      <h1>Wooden Labyrinth</h1>
+      <div class="brand-sub">Level Editor</div>
+    </div>
+  </div>
+
+  <div class="pack-picker">
+    <select id="pack-select" aria-label="Pack list">
+      <option value="">— choose a pack —</option>
+    </select>
+    <input id="pack-id" type="text" placeholder="…or type a pack ID" autocomplete="off" spellcheck="false" />
+    <button id="btn-open" class="btn" type="button">Open</button>
+  </div>
+
+  <div class="topbar-actions">
+    <span id="loaded-indicator" class="loaded-indicator" hidden>
+      <span class="dot"></span>
+      <span id="loaded-name">no pack</span>
+    </span>
+    <button id="btn-new-pack" class="btn btn-ghost" type="button">New…</button>
+    <button id="btn-save" class="btn btn-primary" type="button" disabled>Save</button>
+    <button id="btn-settings" class="icon-btn icon-btn-lg" type="button" title="Settings" aria-label="Settings">⚙</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel panel-left">
+    <section class="panel-section">
+      <h2>Pack</h2>
+      <label class="field">
+        <span>Pack name</span>
+        <input id="pack-name" type="text" placeholder="My Pack" />
+      </label>
+      <label class="field">
+        <span>Author</span>
+        <input id="pack-author" type="text" placeholder="Anonymous" />
+      </label>
+    </section>
+
+    <section class="panel-section panel-section-grow">
+      <div class="section-header">
+        <h2>Levels</h2>
+        <div class="section-actions">
+          <button id="btn-add-level" class="icon-btn" type="button" title="Add level">+</button>
+          <button id="btn-dup-level" class="icon-btn" type="button" title="Duplicate level">⎘</button>
+          <button id="btn-del-level" class="icon-btn icon-btn-danger" type="button" title="Delete level">×</button>
+        </div>
+      </div>
+      <ol id="level-list" class="level-list"></ol>
+    </section>
+  </aside>
+
+  <section class="board-wrap" id="board-wrap">
+    <div class="toolbar">
+      <div class="tool-group" role="radiogroup" aria-label="Tool">
+        <button class="tool" data-tool="select" title="Select / move (V)">Select</button>
+        <button class="tool" data-tool="wall" title="Draw wall (W)">Wall</button>
+        <button class="tool" data-tool="hole" title="Place hole (H)">Hole</button>
+        <button class="tool" data-tool="start" title="Place start (S)">Start</button>
+        <button class="tool" data-tool="goal" title="Place goal (G)">Goal</button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="tool-group">
+        <label class="check"><input id="opt-grid" type="checkbox" checked /> Grid</label>
+        <label class="check"><input id="opt-snap" type="checkbox" checked /> Snap</label>
+        <label class="field-inline">
+          <span>Step</span>
+          <select id="opt-step">
+            <option value="1">1 px</option>
+            <option value="2">2 px</option>
+            <option value="4">4 px</option>
+            <option value="8" selected>8 px</option>
+            <option value="16">16 px</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div class="canvas-stage" id="canvas-stage">
+      <div id="board-empty" class="board-empty">
+        <div class="board-empty-card">
+          <h2>No pack open</h2>
+          <p>Pick a pack from the dropdown above, type its ID, or click <strong>New…</strong> to start a fresh pack.</p>
+        </div>
+      </div>
+      <canvas id="board" width="480" height="320" aria-label="Level board" hidden></canvas>
+      <div class="board-coords" id="board-coords" hidden>—</div>
+    </div>
+
+    <div class="hint">
+      <strong>Tip:</strong> drag the corner handle to resize a wall. Press
+      <kbd>H</kbd> to toggle wall height (full / half). Arrows nudge selection
+      (<kbd>⇧</kbd> = 10 px). <kbd>D</kbd> duplicates, <kbd>⌫</kbd> deletes.
+      <kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd> undo / redo. <kbd>⌘S</kbd> saves to GitHub.
+    </div>
+  </section>
+
+  <aside class="panel panel-right">
+    <section class="panel-section">
+      <h2>Level</h2>
+      <label class="field">
+        <span>Name</span>
+        <input id="level-name" type="text" placeholder="Unnamed" />
+      </label>
+      <div class="field-row">
+        <label class="field">
+          <span>Par time (s)</span>
+          <input id="level-partime" type="number" min="0" step="1" />
+        </label>
+        <label class="field">
+          <span>Dev time (s)</span>
+          <input id="level-devtime" type="number" min="0" step="0.01" />
+        </label>
+      </div>
+      <label class="check">
+        <input id="level-jump" type="checkbox" />
+        Allow jumping (&lt;jump&gt;1&lt;/jump&gt;)
+      </label>
+    </section>
+
+    <section class="panel-section">
+      <h2>Selection</h2>
+      <div id="sel-empty" class="muted">Nothing selected. Click an element on the board.</div>
+      <div id="sel-form" hidden>
+        <div class="sel-kind"><span id="sel-kind-label"></span></div>
+        <div class="field-row">
+          <label class="field"><span>X</span><input id="sel-x" type="number" step="1" /></label>
+          <label class="field"><span>Y</span><input id="sel-y" type="number" step="1" /></label>
+        </div>
+        <div class="field-row">
+          <label class="field"><span>Width</span><input id="sel-w" type="number" min="1" step="1" /></label>
+          <label class="field"><span>Height</span><input id="sel-h" type="number" min="1" step="1" /></label>
+        </div>
+        <div id="sel-wall-extra" class="field" hidden>
+          <span>Wall height</span>
+          <div class="seg">
+            <button type="button" data-size="0.5" class="seg-btn">Low (0.5)</button>
+            <button type="button" data-size="1"   class="seg-btn">Full (1.0)</button>
+          </div>
+        </div>
+        <div class="sel-actions">
+          <button id="sel-dup" class="btn btn-ghost" type="button">Duplicate</button>
+          <button id="sel-del" class="btn btn-danger" type="button">Delete</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-section">
+      <h2>Stats</h2>
+      <ul class="stats">
+        <li><span>Walls</span><b id="stat-walls">0</b></li>
+        <li><span>Holes</span><b id="stat-holes">0</b></li>
+        <li><span>Start</span><b id="stat-start">—</b></li>
+        <li><span>Goal</span><b id="stat-goal">—</b></li>
+      </ul>
+    </section>
+  </aside>
+</main>
+
+<!-- ============================== Settings modal ============================== -->
+<div id="settings-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card">
+    <header class="modal-header">
+      <h2>Settings</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">×</button>
+    </header>
+
+    <div class="modal-body">
+      <section class="modal-section">
+        <div class="status-row">
+          <span id="status-dot" class="status-dot status-dot-unknown"></span>
+          <span id="status-text" class="status-text">Not connected</span>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h3>GitHub repository</h3>
+        <label class="field">
+          <span>Owner / repo</span>
+          <input id="cfg-repo" type="text" placeholder="user/repo" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Branch</span>
+            <input id="cfg-branch" type="text" placeholder="main" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>Packs directory</span>
+            <input id="cfg-prefix" type="text" placeholder="packs" autocomplete="off" spellcheck="false" />
+          </label>
+        </div>
+      </section>
+
+      <section class="modal-section">
+        <h3>Personal access token</h3>
+        <p class="muted">
+          A token is required to <em>save</em> packs. It's stored only in this
+          browser (<code>localStorage</code>). Reading packs from a public repo
+          works without a token.
+        </p>
+        <label class="field">
+          <span>Token</span>
+          <input id="cfg-token" type="password" placeholder="github_pat_… or ghp_…" autocomplete="off" spellcheck="false" />
+        </label>
+        <details class="help">
+          <summary>How do I create one?</summary>
+          <ol class="help-list">
+            <li>
+              Open
+              <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener">
+                github.com/settings/personal-access-tokens
+              </a>
+              and click <b>Generate new token</b> (fine-grained).
+            </li>
+            <li>Resource owner: <b>your user</b>. Repository access: <b>Only select repositories</b> → pick this editor's repo.</li>
+            <li>Permissions → Repository permissions → <b>Contents: Read and write</b>.</li>
+            <li>Generate, copy the token, paste it above, click <b>Save settings</b>.</li>
+          </ol>
+        </details>
+      </section>
+    </div>
+
+    <footer class="modal-footer">
+      <button id="cfg-test" class="btn btn-ghost" type="button">Test connection</button>
+      <div class="modal-footer-spacer"></div>
+      <button id="cfg-cancel" class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button id="cfg-save" class="btn btn-primary" type="button">Save settings</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============================== New-pack modal ============================== -->
+<div id="newpack-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card modal-card-sm">
+    <header class="modal-header">
+      <h2>Create new pack</h2>
+      <button class="icon-btn" type="button" data-close aria-label="Close">×</button>
+    </header>
+    <div class="modal-body">
+      <label class="field">
+        <span>Pack ID (filename, no extension)</span>
+        <input id="new-id" type="text" placeholder="myCoolPack" autocomplete="off" spellcheck="false" />
+        <small class="muted">Becomes <code id="new-id-preview">packs/&lt;id&gt;.xml</code></small>
+      </label>
+      <label class="field">
+        <span>Pack name (shown in game)</span>
+        <input id="new-name" type="text" placeholder="My Cool Pack" />
+      </label>
+      <label class="field">
+        <span>Author</span>
+        <input id="new-author" type="text" placeholder="Your name" />
+      </label>
+    </div>
+    <footer class="modal-footer">
+      <div class="modal-footer-spacer"></div>
+      <button class="btn btn-ghost" type="button" data-close>Cancel</button>
+      <button id="new-create" class="btn btn-primary" type="button">Create</button>
+    </footer>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="editor.js" defer></script>
+</body>
+</html>
