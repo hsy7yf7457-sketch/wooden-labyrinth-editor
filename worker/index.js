@@ -38,6 +38,7 @@ async function ghFetch(env, path, init = {}) {
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "wl-editor-save-worker",
     Authorization: `Bearer ${token}`,
     ...(init.headers || {}),
   };
@@ -130,6 +131,7 @@ export default {
             headers: {
               Accept: "application/vnd.github+json",
               "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "wl-editor-save-worker",
               Authorization: `Bearer ${token}`,
             },
           });
