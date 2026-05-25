@@ -37,6 +37,7 @@ const BORDER_W = 20; // permanent side/top/bottom rails (matches iOS game)
 const TEX_BOARD_W = 320;
 const TEX_BOARD_H = 480;
 const HISTORY_LIMIT = 100;
+const MIN_PLAYER_PACK_ID = 500; // official packs 1–499 are read-only in the editor
 
 // Resolve paths from this script's folder (reliable on GitHub Pages subpaths).
 const EDITOR_BASE = (() => {
@@ -167,6 +168,16 @@ function filenameToId(filename) {
 
 function isNumericId(id) { return /^\d+$/.test(String(id).trim()); }
 
+function isOfficialPackId(id) {
+  return isNumericId(id) && +String(id).trim() < MIN_PLAYER_PACK_ID;
+}
+
+function canSaveLoadedPack() {
+  if (!state.loaded) return false;
+  if (state.loaded.id == null) return true;
+  return !isOfficialPackId(state.loaded.id);
+}
+
 function getAllTakenNumericIds(extraPacks = []) {
   const taken = new Set();
   for (const p of extraPacks) {
@@ -176,7 +187,7 @@ function getAllTakenNumericIds(extraPacks = []) {
   return taken;
 }
 
-function getNextFreeNumericId(extraPacks = [], start = 500) {
+function getNextFreeNumericId(extraPacks = [], start = MIN_PLAYER_PACK_ID) {
   const taken = getAllTakenNumericIds(extraPacks);
   let n = start;
   while (taken.has(n)) n++;
@@ -655,7 +666,7 @@ function setLoaded(loaded) {
   state.loaded = loaded;
   state.unlock = null;   // session password cache resets when pack changes
   syncLoadedIndicator();
-  $("btn-save").disabled = !loaded;
+  $("btn-save").disabled = !canSaveLoadedPack();
 }
 
 function markDirty() {
@@ -671,12 +682,14 @@ function syncLoadedIndicator() {
   if (!state.loaded) { el.hidden = true; return; }
   el.hidden = false;
   const isNew = state.loaded.isNew || state.loaded.id == null;
-  el.classList.toggle("dirty", !!state.loaded.dirty && !isNew);
-  el.classList.toggle("saved", !state.loaded.dirty && !isNew);
+  const readOnly = !isNew && isOfficialPackId(state.loaded.id);
+  el.classList.toggle("dirty", !!state.loaded.dirty && !isNew && !readOnly);
+  el.classList.toggle("saved", !state.loaded.dirty && !isNew && !readOnly);
   el.classList.toggle("new",   isNew);
-  const tag = isNew ? " (unsaved)" : (state.loaded.dirty ? " •" : "");
+  const tag = isNew ? " (unsaved)" : (readOnly ? " (read-only)" : (state.loaded.dirty ? " •" : ""));
   const label = state.loaded.id == null ? "New pack" : "Pack " + state.loaded.id;
   $("loaded-name").textContent = label + tag;
+  $("btn-save").disabled = !canSaveLoadedPack();
 }
 
 function confirmDiscardDirty() {
@@ -878,6 +891,11 @@ $("save-password").addEventListener("keydown", (e) => {
 async function savePack() {
   if (!state.loaded) return;
 
+  if (!canSaveLoadedPack()) {
+    showToast(`Built-in packs (IDs 1–${MIN_PLAYER_PACK_ID - 1}) can't be saved. Use New pack to save your own.`, "error", 5000);
+    return;
+  }
+
   try {
     await ensureSaveServerConfigured();
   } catch (e) {
@@ -931,7 +949,7 @@ async function savePack() {
       console.warn(e);
     }
 
-    let id = getNextFreeNumericId(serverPacks, 500);
+    let id = getNextFreeNumericId(serverPacks, MIN_PLAYER_PACK_ID);
     let attempt = 0;
     while (attempt < 4) {
       try {
@@ -967,6 +985,9 @@ async function savePack() {
 
 async function doSaveCurrent() {
   const id = state.loaded.id;
+  if (isOfficialPackId(id)) {
+    throw Object.assign(new Error(`Built-in packs (IDs 1–${MIN_PLAYER_PACK_ID - 1}) can't be saved.`), { status: 403 });
+  }
   const xml = serializePack(state.pack);
   const { sha } = await gh.writePack(id, xml, state.loaded.sha, false);
   state.loaded.sha = sha || state.loaded.sha;

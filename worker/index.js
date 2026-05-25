@@ -63,6 +63,22 @@ function packPath(env, filename) {
   return `${prefix}/${filename}`;
 }
 
+const MIN_PLAYER_PACK_ID = 500;
+
+function packIdFromPath(path) {
+  const m = String(path).match(/pack(\d+)\.xml$/i);
+  return m ? +m[1] : null;
+}
+
+function assertPlayerPackId(path) {
+  const id = packIdFromPath(path);
+  if (id != null && id < MIN_PLAYER_PACK_ID) {
+    const err = new Error(`Built-in packs (IDs 1–${MIN_PLAYER_PACK_ID - 1}) cannot be modified`);
+    err.status = 403;
+    throw err;
+  }
+}
+
 async function writeSaveApiConfig(request, env) {
   const origin = new URL(request.url).origin;
   const body = JSON.stringify({ url: origin }, null, 2) + "\n";
@@ -190,6 +206,7 @@ export default {
         if (!filename || !xml) return json({ error: "filename and xml required" }, 400);
 
         const path = filename.includes("/") ? filename : packPath(env, filename);
+        assertPlayerPackId(path);
         const payload = {
           message: `${isNew ? "Create" : "Update"} ${path} via Level Editor`,
           content: btoa(unescape(encodeURIComponent(xml))),
