@@ -46,20 +46,16 @@ jobs:
             echo "WORKER_GITHUB_TOKEN cannot read packs/. Update the PAT to Contents: read and write on wooden-labyrinth-editor."
             exit 1
           fi
-          echo "PAT length: ${#WORKER_GITHUB_TOKEN}"
-          npx wrangler secret delete GITHUB_TOKEN 2>/dev/null || true
-          npx wrangler secret delete WLLE_GITHUB_TOKEN 2>/dev/null || true
-          node --input-type=module -e "import { writeFileSync } from 'node:fs'; writeFileSync('/tmp/wlle-secrets.json', JSON.stringify({ WLLE_GITHUB_TOKEN: process.env.WORKER_GITHUB_TOKEN }));"
-          npx wrangler secret bulk /tmp/wlle-secrets.json
-          rm -f /tmp/wlle-secrets.json
           npx wrangler deploy 2>&1 | tee /tmp/deploy.log
           node scripts/publish-url.mjs < /tmp/deploy.log
-          WORKER_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
+          printf '%s' "$WORKER_GITHUB_TOKEN" | npx wrangler secret put WLLE_GITHUB_TOKEN
+          npx wrangler deploy 2>&1 | tee /tmp/deploy2.log
+          WORKER_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' /tmp/deploy2.log | head -1)
           echo "Worker URL: $WORKER_URL"
           for i in 1 2 3 4 5 6 7 8 9 10; do
             HEALTH=$(curl -sS "$WORKER_URL/health")
             echo "Health: $HEALTH"
-            echo "$HEALTH" | grep -q '"githubOk":true' && echo "Worker GitHub auth OK" && exit 0
+            echo "$HEALTH" | grep -q '"githubOk":true' && curl -fsS "$WORKER_URL/packs" | grep -q '"packs"' && echo "Save server ready" && exit 0
             sleep 3
           done
           exit 1
