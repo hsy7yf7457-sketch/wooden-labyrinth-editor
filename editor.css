@@ -539,7 +539,7 @@ body[data-view="empty"] .panel-right { display: none; }
 }
 #board {
   display: block;
-  background: #000;
+  background: #c9a67a;
   border-radius: 14px;
   box-shadow: var(--board-shadow);
   image-rendering: -webkit-optimize-contrast;

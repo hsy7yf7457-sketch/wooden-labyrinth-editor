@@ -32,6 +32,10 @@ const DEFAULT_GOAL_SIZE = 32;
 const MIN_WALL = 4;
 const MIN_HOLE = 8;
 const BORDER_W = 20; // permanent side/top/bottom rails (matches iOS game)
+// background_flat.png is a 512×512 GL atlas: the portrait board (320×480,
+// including a baked 20 px rail) sits in the top-left; the rest is black padding.
+const TEX_BOARD_W = 320;
+const TEX_BOARD_H = 480;
 const HISTORY_LIMIT = 100;
 
 // Resolve paths from this script's folder (reliable on GitHub Pages subpaths).
@@ -962,22 +966,30 @@ function resizeCanvasForDPR() {
 }
 
 function drawBoardBackground() {
-  // Single stretched texture (same as the iOS game) — never tile; the source
-  // image has padding and seams badly when repeated.
+  // Crop the inner play surface from the atlas — never stretch the full 512×512
+  // (that pulls in black padding and a second baked-in border frame).
   ctx.save();
+  const ix = BORDER_W;
+  const iy = BORDER_W;
+  const iw = BOARD_W - 2 * BORDER_W;
+  const ih = BOARD_H - 2 * BORDER_W;
   if (assets.board) {
-    ctx.drawImage(assets.board, 0, 0, BOARD_W, BOARD_H);
+    ctx.drawImage(
+      assets.board,
+      BORDER_W, BORDER_W, TEX_BOARD_W - 2 * BORDER_W, TEX_BOARD_H - 2 * BORDER_W,
+      ix, iy, iw, ih
+    );
   } else {
     ctx.fillStyle = "#c9a67a";
-    ctx.fillRect(0, 0, BOARD_W, BOARD_H);
+    ctx.fillRect(ix, iy, iw, ih);
   }
 
-  // Very subtle edge darkening only.
-  const g = ctx.createRadialGradient(BOARD_W / 2, BOARD_H / 2, 100, BOARD_W / 2, BOARD_H / 2, 360);
+  // Very subtle edge darkening on the play surface only.
+  const g = ctx.createRadialGradient(BOARD_W / 2, BOARD_H / 2, 60, BOARD_W / 2, BOARD_H / 2, 260);
   g.addColorStop(0, "rgba(0,0,0,0)");
   g.addColorStop(1, "rgba(0,0,0,0.08)");
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, BOARD_W, BOARD_H);
+  ctx.fillRect(ix, iy, iw, ih);
   ctx.restore();
 }
 
@@ -1005,7 +1017,7 @@ function drawGrid() {
   if (!state.options.grid) return;
   const step = state.options.step;
   ctx.save();
-  ctx.strokeStyle = "rgba(255, 230, 200, 0.06)";
+  ctx.strokeStyle = "rgba(70, 45, 25, 0.28)";
   ctx.lineWidth = 1 / (canvas.width / BOARD_W); // 1 device px
   ctx.beginPath();
   for (let x = 0; x <= BOARD_W; x += step) {
@@ -1019,7 +1031,7 @@ function drawGrid() {
   ctx.stroke();
   // Stronger lines every 8 steps (e.g. 64)
   if (step <= 8) {
-    ctx.strokeStyle = "rgba(255, 230, 200, 0.10)";
+    ctx.strokeStyle = "rgba(45, 28, 15, 0.45)";
     ctx.beginPath();
     const major = step * 8;
     for (let x = 0; x <= BOARD_W; x += major) {
@@ -1719,16 +1731,22 @@ function wireTileDnd(tile) {
 function drawLevelThumb(canvas, lvl) {
   const c = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
-  if (assets.board) {
-    c.drawImage(assets.board, 0, 0, W, H);
-  } else {
-    c.fillStyle = "#c9a67a";
-    c.fillRect(0, 0, W, H);
-  }
-
   const sx = W / BOARD_W, sy = H / BOARD_H;
   const px = (n) => n * sx;
   const py = (n) => n * sy;
+  const ix = px(BORDER_W), iy = py(BORDER_W);
+  const iw = px(BOARD_W - 2 * BORDER_W), ih = py(BOARD_H - 2 * BORDER_W);
+  if (assets.board) {
+    c.drawImage(
+      assets.board,
+      BORDER_W, BORDER_W, TEX_BOARD_W - 2 * BORDER_W, TEX_BOARD_H - 2 * BORDER_W,
+      ix, iy, iw, ih
+    );
+  } else {
+    c.fillStyle = "#c9a67a";
+    c.fillRect(ix, iy, iw, ih);
+  }
+
   const tileFill = (img, x, y, w, h, fallback) => {
     if (img) {
       c.fillStyle = c.createPattern(img, "repeat");
