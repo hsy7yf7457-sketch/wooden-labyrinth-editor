@@ -52,7 +52,6 @@
         <span>Save password</span>
         <div class="pwd-row">
           <span id="pack-pwd-status" class="pwd-status">—</span>
-          <button id="pack-pwd-btn" class="btn btn-ghost btn-sm" type="button" disabled>Set…</button>
         </div>
       </div>
     </section>
@@ -250,22 +249,21 @@
   </div>
 </div>
 
-<!-- ============================== New-pack modal ============================== -->
+<!-- ============================== New-pack modal ==============================
+  Creates a pack in browser memory only. Nothing hits the server until the
+  user clicks Save (which opens the first-save modal below). -->
 <div id="newpack-modal" class="modal" hidden aria-modal="true" role="dialog">
   <div class="modal-backdrop" data-close></div>
   <div class="modal-card modal-card-sm">
     <header class="modal-header">
-      <h2>Create new pack</h2>
+      <h2>New pack</h2>
       <button class="icon-btn" type="button" data-close aria-label="Close">×</button>
     </header>
     <div class="modal-body">
-      <label class="field">
-        <span>Pack ID</span>
-        <input id="new-id" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" />
-        <small class="muted">
-          Next free ID, starting at 500. Becomes <code id="new-id-preview">packs/pack&lt;id&gt;.xml</code>.
-        </small>
-      </label>
+      <p class="muted">
+        Creates an empty pack in your browser. Nothing is uploaded until you
+        click <b>Save</b>; you'll get an ID and set the save password then.
+      </p>
       <label class="field">
         <span>Pack name (shown in game)</span>
         <input id="new-name" type="text" placeholder="My Cool Pack" />
@@ -274,19 +272,48 @@
         <span>Author</span>
         <input id="new-author" type="text" placeholder="Your name" />
       </label>
-      <label class="field">
-        <span>Save password (optional)</span>
-        <input id="new-password" type="password" placeholder="Leave blank for an unprotected pack" autocomplete="new-password" />
-        <small class="muted">
-          If set, anyone editing this pack will need this password to save
-          their changes back. Loading the pack never requires the password.
-        </small>
-      </label>
     </div>
     <footer class="modal-footer">
       <div class="modal-footer-spacer"></div>
       <button class="btn btn-ghost" type="button" data-close>Cancel</button>
-      <button id="new-create" class="btn btn-primary" type="button">Create &amp; reserve ID</button>
+      <button id="new-create" class="btn btn-primary" type="button">Start editing</button>
+    </footer>
+  </div>
+</div>
+
+<!-- ============================== First-save modal ==============================
+  Shown the first time you save a brand-new pack. Assigns the next free ID
+  (>= 500), and lets you set the optional save password that will gate
+  future saves. -->
+<div id="firstsave-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card modal-card-sm">
+    <header class="modal-header">
+      <h2>Save new pack</h2>
+    </header>
+    <div class="modal-body">
+      <p class="muted">
+        About to commit this pack as <code id="fs-id-preview">packs/pack<wbr/>500.xml</code>.
+        Once saved, the ID is reserved and the password (if any) is fixed.
+      </p>
+      <label class="field">
+        <span>Save password (optional)</span>
+        <input id="fs-password" type="password" autocomplete="new-password" placeholder="Leave blank for no password" />
+        <small class="muted">
+          If set, only this password will allow saving edits later. Loading
+          the pack will not require it.
+        </small>
+      </label>
+      <label class="field" id="fs-confirm-row" hidden>
+        <span>Confirm password</span>
+        <input id="fs-confirm" type="password" autocomplete="new-password" />
+        <small id="fs-error" class="pwd-error"></small>
+      </label>
+    </div>
+    <footer class="modal-footer">
+      <div class="modal-footer-spacer"></div>
+      <button id="fs-cancel" class="btn btn-ghost" type="button">Cancel</button>
+      <button id="fs-save" class="btn btn-primary" type="button">Save</button>
     </footer>
   </div>
 </div>
@@ -314,36 +341,6 @@
   </div>
 </div>
 
-<!-- ============================== Password manage modal ============================== -->
-<div id="pm-modal" class="modal" hidden aria-modal="true" role="dialog">
-  <div class="modal-backdrop"></div>
-  <div class="modal-card modal-card-sm">
-    <header class="modal-header">
-      <h2 id="pm-title">Set password</h2>
-    </header>
-    <div class="modal-body">
-      <p id="pm-help" class="muted"></p>
-      <div id="pm-current-row" class="field" hidden>
-        <span>Current password</span>
-        <input id="pm-current" type="password" autocomplete="current-password" />
-      </div>
-      <label class="field">
-        <span>New password</span>
-        <input id="pm-new" type="password" autocomplete="new-password" />
-      </label>
-      <label class="field">
-        <span>Confirm new password</span>
-        <input id="pm-confirm" type="password" autocomplete="new-password" />
-        <small id="pm-error" class="pwd-error"></small>
-      </label>
-    </div>
-    <footer class="modal-footer">
-      <div class="modal-footer-spacer"></div>
-      <button id="pm-cancel" class="btn btn-ghost" type="button">Cancel</button>
-      <button id="pm-submit" class="btn btn-primary" type="button">Apply</button>
-    </footer>
-  </div>
-</div>
 
 <div id="toast" class="toast" hidden></div>
 

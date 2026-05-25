@@ -564,16 +564,19 @@ function syncLoadedIndicator() {
   const el = $("loaded-indicator");
   if (!state.loaded) { el.hidden = true; return; }
   el.hidden = false;
-  el.classList.toggle("dirty", !!state.loaded.dirty && !state.loaded.isNew);
-  el.classList.toggle("saved", !state.loaded.dirty && !state.loaded.isNew);
-  el.classList.toggle("new",   !!state.loaded.isNew);
-  const tag = state.loaded.isNew ? " (new)" : (state.loaded.dirty ? " •" : "");
-  $("loaded-name").textContent = "Pack " + state.loaded.id + tag;
+  const isNew = state.loaded.isNew || state.loaded.id == null;
+  el.classList.toggle("dirty", !!state.loaded.dirty && !isNew);
+  el.classList.toggle("saved", !state.loaded.dirty && !isNew);
+  el.classList.toggle("new",   isNew);
+  const tag = isNew ? " (unsaved)" : (state.loaded.dirty ? " •" : "");
+  const label = state.loaded.id == null ? "New pack" : "Pack " + state.loaded.id;
+  $("loaded-name").textContent = label + tag;
 }
 
 function confirmDiscardDirty() {
   if (!state.loaded || !state.loaded.dirty) return true;
-  return window.confirm(`Pack ${state.loaded.id} has unsaved changes. Discard them?`);
+  const label = state.loaded.id == null ? "This new pack" : `Pack ${state.loaded.id}`;
+  return window.confirm(`${label} has unsaved changes. Discard them?`);
 }
 
 function applyLoadedPack(id, pack, sha, { isNew = false, dirty = false } = {}) {
@@ -610,13 +613,26 @@ async function openPackById(rawId) {
   }
 }
 
-// Save flow:
-//   1. If pack has passwordHash, require the matching password (cached per
-//      session for this pack ID so the user is only asked once).
-//   2. PUT the file via the GitHub Contents API.
+// Save flow has three branches:
+//
+//   (a) Pack is brand-new (state.loaded.id == null):
+//         pop the "first save" modal — pick next free ID, set optional
+//         password, commit. ID is reserved at this moment, never earlier.
+//   (b) Pack was loaded from the server and has a <password> in its XML:
+//         pop the "enter password" modal, verify against the stored hash,
+//         then commit. Verified password is cached per pack ID for this
+//         session so subsequent saves don't re-prompt.
+//   (c) Pack was loaded from the server with no password:
+//         commit directly. The editor never adds a password to a pack that
+//         didn't have one at load time — password is set once, on first save.
 async function savePack() {
   if (!state.loaded) return;
   if (!gh.token) { openSettings("Paste a GitHub token to save."); return; }
+
+  if (state.loaded.id == null) {
+    await firstSaveFlow();
+    return;
+  }
 
   if (state.pack.passwordHash) {
     const cached = state.unlock
@@ -628,7 +644,7 @@ async function savePack() {
         message: `Pack ${state.loaded.id} is protected by the author. Enter the password to save your changes.`,
         verifyHash: state.pack.passwordHash,
       });
-      if (pwd == null) return; // cancelled
+      if (pwd == null) return;
       state.unlock = { id: state.loaded.id, hash: state.pack.passwordHash };
     }
   }
@@ -641,12 +657,11 @@ async function doSaveCurrent() {
   showToast(`Saving pack ${id}…`);
   try {
     const xml = serializePack(state.pack);
-    const { sha } = await gh.writePack(id, xml, state.loaded.sha, state.loaded.isNew);
+    const { sha } = await gh.writePack(id, xml, state.loaded.sha, false);
     state.loaded.sha = sha || state.loaded.sha;
     state.loaded.isNew = false;
     state.loaded.dirty = false;
     syncLoadedIndicator();
-    await refreshPackList();
     showToast(`Saved pack ${id} ✓`, "ok");
   } catch (e) {
     console.error(e);
@@ -654,52 +669,53 @@ async function doSaveCurrent() {
       showToast(`Conflict: pack ${state.loaded.id} was modified on GitHub since you opened it. Reload to merge manually.`, "error");
     } else if (e.status === 401 || e.status === 403) {
       showToast("Auth failed. Check that your token has Contents: read & write on this repo.", "error");
-    } else if (e.status === 422) {
-      showToast(`Pack ${state.loaded.id} already exists on the server. Pick a different ID.`, "error");
     } else {
       showToast(e.message || "Save failed", "error");
     }
   }
 }
 
-// New-pack flow:
-//   1. Compute the next free numeric ID (≥ 500) from the server listing.
-//   2. Ask the author for name, optional password.
-//   3. Save immediately to reserve the ID (creator can't be sniped between
-//      open and first edit). If the chosen ID was racially taken in the
-//      meantime, retry once with the next free.
-async function createNewPack({ id, packname, author, password }) {
-  if (!id) { showToast("Pack ID required.", "error"); return; }
-  if (!gh.configured) { openSettings("Configure the GitHub repo first."); return; }
-  if (!gh.token) { openSettings("A GitHub token is needed to create a new pack."); return; }
-  if (!confirmDiscardDirty()) return;
-
-  const pack = emptyPack();
-  pack.packname = packname || `Pack ${id}`;
-  pack.author = author || "";
-  if (password && password.length) {
-    pack.passwordHash = await sha256Hex(password);
+// First-save flow:
+//   1. List packs, compute next free ID ≥ 500.
+//   2. Pop the first-save modal: shows the ID, asks for an optional password
+//      (with confirmation if any password is typed).
+//   3. PUT with no SHA → creates the file. If 422/409 (someone took the ID
+//      in between), bump to the next free ID and retry.
+async function firstSaveFlow() {
+  let packs;
+  try {
+    packs = await gh.listPacks();
+  } catch (e) {
+    showToast(e.message || "Couldn't fetch pack list.", "error");
+    return;
   }
+  let candidate = getNextFreeNumericId(packs, 500);
+  const choice = await promptFirstSave(candidate);
+  if (!choice) return;
+  const { password } = choice;
 
-  let usedId = String(id);
+  let passwordHash = null;
+  if (password && password.length) {
+    passwordHash = await sha256Hex(password);
+  }
+  state.pack.passwordHash = passwordHash;
+
   let attempt = 0;
   while (attempt < 4) {
     try {
-      const xml = serializePack(pack);
-      const { sha } = await gh.writePack(usedId, xml, null, true);
-      applyLoadedPack(usedId, pack, sha);
-      // If the user set a password, they trivially "know" it for this session.
-      if (pack.passwordHash) {
-        state.unlock = { id: usedId, hash: pack.passwordHash };
-      }
+      const xml = serializePack(state.pack);
+      showToast(`Saving as pack ${candidate}…`);
+      const { sha } = await gh.writePack(candidate, xml, null, true);
+      state.loaded = { id: String(candidate), sha, isNew: false, dirty: false };
+      if (passwordHash) state.unlock = { id: state.loaded.id, hash: passwordHash };
+      syncAll();
       await refreshPackList();
-      showToast(`Created pack ${usedId}`, "ok");
+      showToast(`Saved pack ${candidate} ✓`, "ok");
       return;
     } catch (e) {
       if ((e.status === 422 || e.status === 409) && attempt < 3) {
-        // Someone else took this ID. Bump and retry.
-        const packs = await gh.listPacks();
-        usedId = String(getNextFreeNumericId(packs, +usedId + 1));
+        const fresh = await gh.listPacks();
+        candidate = getNextFreeNumericId(fresh, candidate + 1);
         attempt++;
         continue;
       }
@@ -707,11 +723,22 @@ async function createNewPack({ id, packname, author, password }) {
       if (e.status === 401 || e.status === 403) {
         showToast("Auth failed. Check that your token has Contents: read & write on this repo.", "error");
       } else {
-        showToast(e.message || "Could not create pack", "error");
+        showToast(e.message || "Save failed", "error");
       }
       return;
     }
   }
+}
+
+// New-pack flow — purely client-side. Nothing hits the server until the user
+// hits Save (which triggers `firstSaveFlow` above).
+function createNewPack({ packname, author }) {
+  if (!confirmDiscardDirty()) return;
+  const pack = emptyPack();
+  pack.packname = packname || "Untitled Pack";
+  pack.author = author || "";
+  applyLoadedPack(null, pack, null, { isNew: true, dirty: true });
+  showToast("New pack started. Edit, then click Save to commit.", "ok");
 }
 
 // ----------------------- Pack-picker UI -----------------------
@@ -765,56 +792,76 @@ $("btn-open").addEventListener("click", () => openPackById($("pack-id").value));
 $("btn-save").addEventListener("click", () => savePack());
 
 // ----------------------- New-pack modal -----------------------
-async function openNewPack() {
-  if (!gh.configured) { openSettings("Configure the GitHub repo first."); return; }
-  $("new-id").value = "(loading…)";
+function openNewPack() {
   $("new-name").value = "";
   $("new-author").value = "";
-  $("new-password").value = "";
-  updateNewIdPreview();
   $("newpack-modal").hidden = false;
-  // Find the next free numeric ID ≥ 500 from the live listing.
-  try {
-    const packs = await gh.listPacks();
-    const nextId = getNextFreeNumericId(packs, 500);
-    $("new-id").value = String(nextId);
-    updateNewIdPreview();
-    setTimeout(() => $("new-name").focus(), 0);
-  } catch (e) {
-    console.error(e);
-    $("new-id").value = "500";
-    updateNewIdPreview();
-  }
-}
-
-function updateNewIdPreview() {
-  const v = $("new-id").value.trim() || "<id>";
-  const filename = /^\d+$/.test(v) ? `pack${v}.xml` : `${v}.xml`;
-  const prefix = (gh.config.prefix || "").replace(/^\/+|\/+$/g, "");
-  $("new-id-preview").textContent = prefix ? `${prefix}/${filename}` : filename;
+  setTimeout(() => $("new-name").focus(), 0);
 }
 
 $("btn-new-pack").addEventListener("click", openNewPack);
-$("new-id").addEventListener("input", updateNewIdPreview);
 
-$("new-create").addEventListener("click", async () => {
-  const id = $("new-id").value.trim();
-  if (!/^\d+$/.test(id)) {
-    showToast("Pack ID must be a positive number.", "error");
-    return;
-  }
-  if (+id < 1) {
-    showToast("Pack ID must be ≥ 1.", "error");
-    return;
-  }
-  const password = $("new-password").value;
+$("new-create").addEventListener("click", () => {
   closeModals();
-  await createNewPack({
-    id,
+  createNewPack({
     packname: $("new-name").value.trim(),
     author: $("new-author").value.trim(),
-    password: password || null,
   });
+});
+
+// ----------------------- First-save modal -----------------------
+// Resolves to { password } or null (cancelled). Validates "password ===
+// confirm" only when the user actually typed a password.
+let firstSaveResolve = null;
+function promptFirstSave(candidateId) {
+  return new Promise((resolve) => {
+    firstSaveResolve = resolve;
+    const prefix = (gh.config.prefix || "").replace(/^\/+|\/+$/g, "");
+    $("fs-id-preview").textContent = prefix
+      ? `${prefix}/pack${candidateId}.xml`
+      : `pack${candidateId}.xml`;
+    $("fs-password").value = "";
+    $("fs-confirm").value = "";
+    $("fs-error").textContent = "";
+    $("fs-confirm-row").hidden = true;
+    $("firstsave-modal").hidden = false;
+    setTimeout(() => $("fs-password").focus(), 0);
+  });
+}
+
+$("fs-password").addEventListener("input", (e) => {
+  $("fs-confirm-row").hidden = !e.target.value;
+  if (!e.target.value) $("fs-confirm").value = "";
+  $("fs-error").textContent = "";
+});
+
+function submitFirstSave() {
+  const pwd = $("fs-password").value;
+  const conf = $("fs-confirm").value;
+  if (pwd && pwd !== conf) {
+    $("fs-error").textContent = "Confirmation doesn't match.";
+    $("fs-confirm").focus();
+    return;
+  }
+  $("firstsave-modal").hidden = true;
+  const r = firstSaveResolve; firstSaveResolve = null;
+  if (r) r({ password: pwd || null });
+}
+function cancelFirstSave() {
+  $("firstsave-modal").hidden = true;
+  const r = firstSaveResolve; firstSaveResolve = null;
+  if (r) r(null);
+}
+$("fs-save").addEventListener("click", submitFirstSave);
+$("fs-cancel").addEventListener("click", cancelFirstSave);
+$("fs-password").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !$("fs-confirm-row").hidden === false) {
+    // password-only field, no confirmation needed — submit immediately
+    e.preventDefault(); submitFirstSave();
+  }
+});
+$("fs-confirm").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitFirstSave(); }
 });
 
 // ----------------------- Settings modal -----------------------
@@ -945,92 +992,34 @@ $("pp-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); submitPasswordPrompt(); }
 });
 
-// ----------------------- Password management modal -----------------------
-function openManagePassword() {
-  if (!state.pack) return;
-  const hasPwd = !!state.pack.passwordHash;
-  $("pm-current-row").hidden = !hasPwd;
-  $("pm-current").value = "";
-  $("pm-new").value = "";
-  $("pm-confirm").value = "";
-  $("pm-error").textContent = "";
-  $("pm-title").textContent = hasPwd ? "Change password" : "Set password";
-  $("pm-help").textContent = hasPwd
-    ? "Enter the current password to change or remove protection. Leave New blank to remove."
-    : "Anyone with a GitHub token won't be able to save changes to this pack without this password.";
-  $("pm-modal").hidden = false;
-  setTimeout(() => (hasPwd ? $("pm-current") : $("pm-new")).focus(), 0);
-}
-
-async function submitManagePassword() {
-  if (!state.pack) return;
-  const hasPwd = !!state.pack.passwordHash;
-  const cur = $("pm-current").value;
-  const next = $("pm-new").value;
-  const conf = $("pm-confirm").value;
-  const errEl = $("pm-error");
-  errEl.textContent = "";
-
-  if (hasPwd) {
-    const h = await sha256Hex(cur);
-    if (h !== state.pack.passwordHash) {
-      errEl.textContent = "Current password is wrong.";
-      return;
-    }
-  }
-  if (next !== conf) {
-    errEl.textContent = "New password and confirmation don't match.";
-    return;
-  }
-
-  pushHistory();
-  if (!next.length) {
-    state.pack.passwordHash = null;
-    state.unlock = null;
-    showToast("Password removed. Save to commit.", "ok");
-  } else {
-    const h = await sha256Hex(next);
-    state.pack.passwordHash = h;
-    // The user clearly knows the new password — auto-unlock this session.
-    state.unlock = { id: state.loaded.id, hash: h };
-    showToast("Password set. Save to commit.", "ok");
-  }
-  syncPackSection();
-  $("pm-modal").hidden = true;
-}
-
-$("pm-submit").addEventListener("click", submitManagePassword);
-$("pm-cancel").addEventListener("click", () => { $("pm-modal").hidden = true; });
-
 // ----------------------- Sidebar pack section -----------------------
+// Read-only — password is set on first save and never changed afterwards.
 function syncPackSection() {
+  const el = $("pack-pwd-status");
   if (!state.pack) {
-    $("pack-pwd-status").textContent = "—";
-    $("pack-pwd-status").className = "pwd-status";
-    $("pack-pwd-btn").disabled = true;
-    $("pack-pwd-btn").textContent = "Set…";
+    el.textContent = "—";
+    el.className = "pwd-status";
     return;
   }
-  $("pack-pwd-btn").disabled = false;
-  if (state.pack.passwordHash) {
-    $("pack-pwd-status").textContent = "🔒 Protected";
-    $("pack-pwd-status").className = "pwd-status pwd-status-locked";
-    $("pack-pwd-btn").textContent = "Change…";
+  if (state.loaded && state.loaded.id == null) {
+    el.textContent = "(set on first save)";
+    el.className = "pwd-status";
+  } else if (state.pack.passwordHash) {
+    el.textContent = "🔒 Protected";
+    el.className = "pwd-status pwd-status-locked";
   } else {
-    $("pack-pwd-status").textContent = "🔓 No password";
-    $("pack-pwd-status").className = "pwd-status pwd-status-open";
-    $("pack-pwd-btn").textContent = "Set…";
+    el.textContent = "🔓 No password";
+    el.className = "pwd-status pwd-status-open";
   }
 }
-
-$("pack-pwd-btn").addEventListener("click", openManagePassword);
 
 function closeModals() {
   $("settings-modal").hidden = true;
   $("newpack-modal").hidden = true;
   $("pp-modal").hidden = true;
-  $("pm-modal").hidden = true;
+  $("firstsave-modal").hidden = true;
   if (passwordPromptResolve) { const r = passwordPromptResolve; passwordPromptResolve = null; r(null); }
+  if (firstSaveResolve) { const r = firstSaveResolve; firstSaveResolve = null; r(null); }
 }
 
 document.querySelectorAll(".modal").forEach((m) => {

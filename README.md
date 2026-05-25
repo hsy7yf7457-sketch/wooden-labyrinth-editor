@@ -16,27 +16,36 @@ GitHub Pages; the repo itself is the database.
    click *Save settings*.
 3. Either pick an existing pack from the dropdown / type its **numeric ID**
    (e.g. `117`) into the input and click **Open** — or click **New…** to
-   create a brand-new pack. New packs are auto-assigned the next free
-   numeric ID ≥ 500 and saved immediately so the ID is reserved.
-4. Edit. If the pack is password-protected, **Save** will prompt for the
-   author's password the first time you save in a session. A commit lands on
-   the configured branch with a message like
+   start a brand-new pack. New packs live only in your browser until you
+   click **Save**; nothing hits the server before then.
+4. Edit. Click **Save** (or `⌘S`):
+   - For a brand-new pack you'll get a "Save new pack" dialog showing the
+     next free numeric ID (≥ 500) and an optional save-password field.
+     Committing reserves that ID on GitHub.
+   - For an existing protected pack, you'll be prompted for the author's
+     save password the first time you save in a session (verified against
+     the hash in the pack XML).
+   - For an existing pack with no password, the save commits directly.
+
+   A commit lands on the configured branch with a message like
    `Update packs/pack517.xml via Level Editor`.
 
-### Pack passwords
+### Save passwords
 
-Each pack can be locked by its author with an optional **save password**:
+Each pack carries an optional **save password**, set by its author the
+first time the pack is saved:
 
 * Loading a pack never requires a password.
-* Saving back to GitHub does — the editor checks the password against the
+* Saving back to GitHub does — the editor checks your input against the
   hash stored in the pack's `<password>` element and only commits on a
   match.
-* Use **Pack → Set… / Change…** in the left sidebar to set, change, or
-  remove the password. Changing or removing requires the current password.
-* The hash is SHA-256, stored in plain XML next to the pack metadata. It's
-  a soft "are you the author" gate, not real crypto — anyone with the pack
-  XML can copy and edit it locally, the password only blocks committing via
-  this editor.
+* The password is set exactly once (on the very first save) and never
+  changed by the editor afterwards. Forgotten passwords mean no more
+  edits via this editor (you'd have to alter the XML directly on GitHub).
+* The hash is SHA-256, stored in plain XML next to the pack metadata.
+  It's a soft "are you the author" gate, not real crypto — anyone with the
+  pack XML can copy and edit it locally; the password only blocks
+  committing via this editor.
 
 The iOS game silently ignores the `<password>` element (its XML parsers
 skip unknown elements at the `<Levelpack>` level).
