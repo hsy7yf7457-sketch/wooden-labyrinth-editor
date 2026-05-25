@@ -22,13 +22,13 @@ When all three secrets exist, say **“secrets are set”** in the editor chat �
 
 1. Deploy `wl-editor-save` to Cloudflare
 2. Write the real `workers.dev` URL into `save-api.json`
-3. Upload `GITHUB_TOKEN` to the worker runtime
+3. Upload `WLLE_GITHUB_TOKEN` to the worker runtime
 
 ## Manual fallback (Cloudflare dashboard)
 
 If you already deployed via Cloudflare’s GitHub integration:
 
-1. Add secret **`GITHUB_TOKEN`** on the worker (Settings → Variables and Secrets)
+1. Add secret **`WLLE_GITHUB_TOKEN`** on the worker (Settings → Variables and Secrets)
 2. Set deploy command: `npm install && npm run deploy`
 3. Retry the build, or paste the **Visit** URL once in the editor’s “Connect save server” dialog
 

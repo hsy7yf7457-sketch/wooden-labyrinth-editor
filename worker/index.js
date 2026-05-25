@@ -5,7 +5,7 @@
  * Deploy with Wrangler (see worker/README.md).
  *
  * Env vars:
- *   GITHUB_TOKEN  — fine-grained PAT with Contents: read & write on the repo
+ *   WLLE_GITHUB_TOKEN — fine-grained PAT with Contents: read & write on the repo
  *   GITHUB_OWNER  — e.g. hsy7yf7457-sketch
  *   GITHUB_REPO   — e.g. wooden-labyrinth-editor
  *   GITHUB_BRANCH — default main
@@ -29,11 +29,16 @@ function apiRoot(env) {
   return `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}`;
 }
 
+function githubToken(env) {
+  return env.WLLE_GITHUB_TOKEN || env.GITHUB_TOKEN || "";
+}
+
 async function ghFetch(env, path, init = {}) {
+  const token = githubToken(env);
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+    Authorization: `Bearer ${token}`,
     ...(init.headers || {}),
   };
   if (init.body) headers["Content-Type"] = "application/json";
@@ -84,7 +89,7 @@ async function writeSaveApiConfig(request, env) {
 }
 
 async function ensureRegistered(request, env) {
-  if (!env.GITHUB_TOKEN) return;
+  if (!githubToken(env)) return;
   const origin = new URL(request.url).origin;
   try {
     const meta = await ghFetch(
@@ -110,8 +115,8 @@ export default {
     const url = new URL(request.url);
 
     try {
-      if (!env.GITHUB_TOKEN) {
-        return json({ error: "GITHUB_TOKEN secret is not set on this worker" }, 503);
+      if (!githubToken(env)) {
+        return json({ error: "WLLE_GITHUB_TOKEN secret is not set on this worker" }, 503);
       }
 
       await ensureRegistered(request, env);

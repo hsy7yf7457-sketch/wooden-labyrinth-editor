@@ -9,4 +9,4 @@ GITHUB_BRANCH = "main"
 PACKS_PREFIX = "packs"
 
 # Set the secret once after deploy:
-#   wrangler secret put GITHUB_TOKEN
+#   wrangler secret put WLLE_GITHUB_TOKEN
