@@ -87,7 +87,7 @@ function loadImage(name, src) {
 }
 const assetsReady = Promise.all([
   loadImage("frame", assetUrl("assets/wood-frame.jpg")),
-  loadImage("board", assetUrl("assets/wood-board.png")),
+  loadImage("board", assetUrl("assets/board-bg.png")),
   loadImage("strip", assetUrl("assets/wood-strip.jpg")),
   loadImage("hole",  assetUrl("assets/hole.png")),
 ]);
@@ -949,24 +949,20 @@ function resizeCanvasForDPR() {
 }
 
 function drawBoardBackground() {
-  // Play-field wood — lighter than the wall planks.
+  // Single stretched texture (same as the iOS game) — never tile; the source
+  // image has padding and seams badly when repeated.
   ctx.save();
   if (assets.board) {
-    const pat = ctx.createPattern(assets.board, "repeat");
-    ctx.fillStyle = pat;
+    ctx.drawImage(assets.board, 0, 0, BOARD_W, BOARD_H);
   } else {
     ctx.fillStyle = "#c9a67a";
+    ctx.fillRect(0, 0, BOARD_W, BOARD_H);
   }
-  ctx.fillRect(0, 0, BOARD_W, BOARD_H);
-
-  // Lift the board above wall tones.
-  ctx.fillStyle = "rgba(255, 235, 210, 0.35)";
-  ctx.fillRect(0, 0, BOARD_W, BOARD_H);
 
   // Very subtle edge darkening only.
   const g = ctx.createRadialGradient(BOARD_W / 2, BOARD_H / 2, 100, BOARD_W / 2, BOARD_H / 2, 360);
   g.addColorStop(0, "rgba(0,0,0,0)");
-  g.addColorStop(1, "rgba(0,0,0,0.12)");
+  g.addColorStop(1, "rgba(0,0,0,0.08)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, BOARD_W, BOARD_H);
   ctx.restore();
