@@ -556,15 +556,35 @@ const gh = {
   },
 
   async readPack(id) {
-    const url = packUrl(id);
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw Object.assign(new Error(`Couldn't load pack ${id}: ${res.status}`), { status: res.status });
-    const xml = await res.text();
-    if (!/^\s*</.test(xml)) {
-      throw Object.assign(new Error("No pack found."), { status: 404 });
+    const filename = idToFilename(id);
+    const relPath = repo.prefix
+      ? `${repo.prefix.replace(/^\/+|\/+$/g, "")}/${filename}`
+      : filename;
+    // Pages/static first; raw GitHub right after a save (Pages rebuild lags ~1–2 min).
+    const sources = [
+      packUrl(id),
+      `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${repo.branch}/${relPath}`,
+    ];
+
+    let lastStatus = 404;
+    for (const url of sources) {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) { lastStatus = res.status; continue; }
+        const xml = await res.text();
+        if (!/^\s*</.test(xml)) { lastStatus = 404; continue; }
+        let sha = this.shaCache.get(String(id)) || null;
+        if (!sha) {
+          const shaData = await saveApi.getSha(relPath);
+          sha = shaData?.sha || null;
+          if (sha) this.shaCache.set(String(id), sha);
+        }
+        return { xml, sha };
+      } catch (e) {
+        if (e.status) lastStatus = e.status;
+      }
     }
-    const sha = this.shaCache.get(String(id)) || null;
-    return { xml, sha };
+    throw Object.assign(new Error(`Couldn't load pack ${id}`), { status: lastStatus });
   },
 
   async listPacksOnServer() {
