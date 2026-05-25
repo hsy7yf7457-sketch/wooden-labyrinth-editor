@@ -528,6 +528,12 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 
 .muted { color: var(--ink-2); font-size: 12px; }
 
+/* Force the HTML `hidden` attribute to always beat any class rule.
+   Without this `.modal { display: flex }` (and friends) override the UA
+   stylesheet's `[hidden] { display: none }` and the modal stays visible
+   even when JS / markup says it shouldn't be. */
+[hidden] { display: none !important; }
+
 /* ---------- Toast / overlay ---------- */
 .toast {
   position: fixed;
