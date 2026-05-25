@@ -1,0 +1,8 @@
+{
+  "name": "wl-editor-save",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "^4.94.0"
+  }
+}

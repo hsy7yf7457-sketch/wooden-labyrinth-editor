@@ -482,7 +482,12 @@ const gh = {
 
 const saveApi = {
   async listPacks() {
-    const res = await fetch(`${SAVE_API_URL}/packs`, { cache: "no-store" });
+    let res;
+    try {
+      res = await fetch(`${SAVE_API_URL}/packs`, { cache: "no-store" });
+    } catch (e) {
+      throw Object.assign(new Error("Could not reach the save server"), { network: true, cause: e });
+    }
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw Object.assign(new Error(j.error || `Save service error (${res.status})`), { status: res.status });
@@ -491,17 +496,27 @@ const saveApi = {
   },
 
   async getSha(path) {
-    const res = await fetch(`${SAVE_API_URL}/sha?file=${encodeURIComponent(path)}`, { cache: "no-store" });
+    let res;
+    try {
+      res = await fetch(`${SAVE_API_URL}/sha?file=${encodeURIComponent(path)}`, { cache: "no-store" });
+    } catch (_) {
+      return { sha: null };
+    }
     if (!res.ok) return { sha: null };
     return res.json();
   },
 
   async save({ filename, xml, sha, isNew }) {
-    const res = await fetch(`${SAVE_API_URL}/save`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename, xml, sha, isNew }),
-    });
+    let res;
+    try {
+      res = await fetch(`${SAVE_API_URL}/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, xml, sha, isNew }),
+      });
+    } catch (e) {
+      throw Object.assign(new Error("Could not reach the save server"), { network: true, cause: e });
+    }
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(j.error || `Save failed (${res.status})`), { status: res.status });
     return j;
@@ -669,6 +684,27 @@ function showSavedSuccess(id) {
   showToast(`Pack saved as ID ${idStr}`, "ok", 3500);
 }
 
+function downloadPackXml(suggestedId) {
+  const xml = serializePack(state.pack);
+  const blob = new Blob([xml], { type: "application/xml;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = suggestedId != null ? idToFilename(suggestedId) : "pack-new.xml";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+function showSaveFailed(e, suggestedId) {
+  const msg = e?.network || /failed to fetch|could not reach/i.test(e?.message || "")
+    ? "Could not reach the save server. Online saving is not set up yet — download your pack as a backup."
+    : (e?.message || "Save failed");
+  $("savefail-message").textContent = msg;
+  $("savefail-modal").dataset.suggestedId = suggestedId != null ? String(suggestedId) : "";
+  $("savefail-modal").hidden = false;
+}
+
 $("save-submit").addEventListener("click", submitSaveModal);
 $("save-cancel").addEventListener("click", cancelSaveModal);
 $("saved-ok").addEventListener("click", () => { $("saved-modal").hidden = true; });
@@ -682,6 +718,12 @@ $("saved-copy").addEventListener("click", async () => {
     showToast("Couldn't copy — select the ID and copy manually", "error", 3000);
   }
 });
+$("savefail-download").addEventListener("click", () => {
+  const raw = $("savefail-modal").dataset.suggestedId;
+  downloadPackXml(raw ? raw : null);
+  showToast("Pack downloaded", "ok", 2000);
+});
+$("savefail-ok").addEventListener("click", () => { $("savefail-modal").hidden = true; });
 $("save-password").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); submitSaveModal(); }
 });
@@ -709,7 +751,7 @@ async function savePack() {
       await doSaveCurrent();
       showSavedSuccess(state.loaded.id);
     } catch (e) {
-      showToast(e.message || "Save failed", "error");
+      showSaveFailed(e, state.loaded.id);
     }
     return;
   }
@@ -752,7 +794,7 @@ async function savePack() {
           attempt++;
           continue;
         }
-        showToast(e.message || "Save failed", "error");
+        showSaveFailed(e, id);
         return;
       }
     }
@@ -764,7 +806,7 @@ async function savePack() {
     await doSaveCurrent();
     showSavedSuccess(state.loaded.id);
   } catch (e) {
-    showToast(e.message || "Save failed", "error");
+    showSaveFailed(e, state.loaded.id);
   }
 }
 
@@ -842,6 +884,7 @@ function closeModals() {
   $("newpack-modal").hidden = true;
   $("save-modal").hidden = true;
   $("saved-modal").hidden = true;
+  $("savefail-modal").hidden = true;
   if (saveModalResolve) { const r = saveModalResolve; saveModalResolve = null; r(null); }
 }
 
@@ -853,7 +896,8 @@ document.querySelectorAll(".modal").forEach((m) => {
 
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    const open = !$("newpack-modal").hidden || !$("save-modal").hidden || !$("saved-modal").hidden;
+    const open = !$("newpack-modal").hidden || !$("save-modal").hidden
+              || !$("saved-modal").hidden || !$("savefail-modal").hidden;
     if (open) {
       closeModals();
       e.stopImmediatePropagation();

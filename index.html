@@ -283,8 +283,26 @@
   </div>
 </div>
 
+<!-- ============================== Save failed modal ============================== -->
+<div id="savefail-modal" class="modal" hidden aria-modal="true" role="dialog">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card modal-card-sm">
+    <header class="modal-header">
+      <h2>Save failed</h2>
+    </header>
+    <div class="modal-body">
+      <p id="savefail-message" class="muted"></p>
+    </div>
+    <footer class="modal-footer">
+      <button id="savefail-download" class="btn btn-ghost" type="button">Download XML</button>
+      <div class="modal-footer-spacer"></div>
+      <button id="savefail-ok" class="btn btn-primary" type="button">OK</button>
+    </footer>
+  </div>
+</div>
+
 <div id="toast" class="toast" hidden></div>
 
-<script src="editor.js?v=10" defer></script>
+<script src="editor.js?v=11" defer></script>
 </body>
 </html>
