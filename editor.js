@@ -1288,13 +1288,16 @@ function pickWallTexture(width, height) {
 }
 
 function wallFallback(size) {
-  return size === 0.5 ? "#9a7048" : "#241408";
+  // Play surface is light tan; full walls are darkest; low walls sit in between.
+  return size === 0.5 ? "#6b4e34" : "#1e1208";
 }
 
 function tintWallByHeight(w, c = ctx) {
-  c.fillStyle = w.size === 0.5
-    ? "rgba(255, 228, 180, 0.48)"
-    : "rgba(0, 0, 0, 0.32)";
+  if (w.size === 0.5) {
+    c.fillStyle = "rgba(38, 24, 14, 0.24)";
+  } else {
+    c.fillStyle = "rgba(0, 0, 0, 0.38)";
+  }
   c.fillRect(w.x, w.y, w.width, w.height);
 }
 
