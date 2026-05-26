@@ -99,7 +99,7 @@ const assetsReady = Promise.all([
   loadImage("borderV", assetUrl("assets/border-v.png")),
   loadImage("borderH", assetUrl("assets/border-h.png")),
   loadImage("hole",     assetUrl("assets/hole.png")),
-  loadImage("ball",     assetUrl("assets/ball.png")),
+  loadImage("ball",     assetUrl("assets/kuula.png")),
   loadImage("goal",     assetUrl("assets/goal.png")),
   loadImage("wallH",    assetUrl("assets/wall-h.png")),
   loadImage("wallV",    assetUrl("assets/wall-v.png")),
