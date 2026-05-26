@@ -1287,6 +1287,17 @@ function pickWallTexture(width, height) {
   return assets.wallSide;
 }
 
+function wallFallback(size) {
+  return size === 0.5 ? "#9a7048" : "#241408";
+}
+
+function tintWallByHeight(w, c = ctx) {
+  c.fillStyle = w.size === 0.5
+    ? "rgba(255, 228, 180, 0.48)"
+    : "rgba(0, 0, 0, 0.32)";
+  c.fillRect(w.x, w.y, w.width, w.height);
+}
+
 function fillTiledTexture(img, x, y, w, h, fallback) {
   if (img) {
     ctx.fillStyle = ctx.createPattern(img, "repeat");
@@ -1325,13 +1336,8 @@ function drawHoverOutline(r, hovered, selected, round) {
 function drawWall(w, hovered, selected) {
   ctx.save();
   const tex = pickWallTexture(w.width, w.height);
-  const fallback = w.size === 1 ? "#3a2515" : "#7a5230";
-  fillTiledTexture(tex, w.x, w.y, w.width, w.height, fallback);
-  // Low walls are shorter in 3D — tint the flat top face slightly lighter.
-  if (w.size < 1) {
-    ctx.fillStyle = "rgba(154, 102, 56, 0.28)";
-    ctx.fillRect(w.x, w.y, w.width, w.height);
-  }
+  fillTiledTexture(tex, w.x, w.y, w.width, w.height, wallFallback(w.size));
+  tintWallByHeight(w);
   drawHoverOutline(w, hovered, selected, false);
   ctx.restore();
 }
@@ -1997,12 +2003,10 @@ function drawLevelThumb(canvas, lvl) {
 
   for (const w of lvl.walls) {
     const tex = pickWallTexture(w.width, w.height);
-    tileFill(tex, px(w.x), py(w.y), px(w.width), py(w.height),
-      w.size === 0.5 ? "#7a5230" : "#3a2515");
-    if (w.size < 1) {
-      c.fillStyle = "rgba(154, 102, 56, 0.28)";
-      c.fillRect(px(w.x), py(w.y), px(w.width), py(w.height));
-    }
+    tileFill(tex, px(w.x), py(w.y), px(w.width), py(w.height), wallFallback(w.size));
+    tintWallByHeight({
+      x: px(w.x), y: py(w.y), width: px(w.width), height: py(w.height), size: w.size,
+    }, c);
   }
   for (const h of lvl.holes) {
     stretch(assets.hole, px(h.x), py(h.y), px(h.width), py(h.height), "#0a0807");
