@@ -1298,6 +1298,19 @@ function tintWallByHeight(w, c = ctx) {
   c.fillRect(w.x, w.y, w.width, w.height);
 }
 
+// Draw low walls first, high walls on top — unless a low wall is selected/hovered.
+function orderedWallIndices(walls, sel, hov) {
+  const rank = (i) => {
+    const isLow = walls[i].size === 0.5;
+    const active = (sel?.kind === "wall" && sel.idx === i)
+      || (hov?.kind === "wall" && hov.idx === i);
+    if (isLow && active) return 2;
+    if (isLow) return 0;
+    return 1;
+  };
+  return walls.map((_, i) => i).sort((a, b) => rank(a) - rank(b) || a - b);
+}
+
 function fillTiledTexture(img, x, y, w, h, fallback) {
   if (img) {
     ctx.fillStyle = ctx.createPattern(img, "repeat");
@@ -1419,8 +1432,8 @@ function draw() {
   const sel = state.selection;
   const hov = state.hover;
 
-  // Order: walls (bottom), holes, start, goal (top)
-  for (let i = 0; i < lvl.walls.length; i++) {
+  // Order: low walls, high walls on top (selected/hovered low wall last), then holes/start/goal
+  for (const i of orderedWallIndices(lvl.walls, sel, hov)) {
     drawWall(lvl.walls[i],
       hov && hov.kind === "wall" && hov.idx === i,
       sel && sel.kind === "wall" && sel.idx === i);
@@ -2001,7 +2014,8 @@ function drawLevelThumb(canvas, lvl) {
     else { c.fillStyle = fallback; c.fillRect(x, y, w, h); }
   };
 
-  for (const w of lvl.walls) {
+  for (const i of orderedWallIndices(lvl.walls, null, null)) {
+    const w = lvl.walls[i];
     const tex = pickWallTexture(w.width, w.height);
     tileFill(tex, px(w.x), py(w.y), px(w.width), py(w.height), wallFallback(w.size));
     tintWallByHeight({
