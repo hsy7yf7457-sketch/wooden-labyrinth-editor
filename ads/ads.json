@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "ads": [
+    {
+      "id": "hammer-golf",
+      "type": "image",
+      "url": "https://hammer-golf.com/editor/ads/img/hammer-golf.png",
+      "click": "https://apps.apple.com/app/6762349301",
+      "weight": 1,
+      "minDisplay": 2,
+      "maxShows": 3
+    }
+  ],
+
+  "_format": "Add entries to the \"ads\" array. The game (lite version) shows one at random every 4 completed levels. Creatives are cached on-device, so they must be reachable URLs. See README.md.",
+  "_example": {
+    "ads": [
+      {
+        "id": "my-other-game",
+        "type": "image",
+        "url": "https://hammer-golf.com/editor/ads/img/my-other-game.png",
+        "click": "https://apps.apple.com/app/id000000000",
+        "weight": 2,
+        "minDisplay": 3,
+        "maxShows": 5
+      },
+      {
+        "id": "my-trailer",
+        "type": "video",
+        "url": "https://hammer-golf.com/editor/ads/video/trailer.mp4",
+        "click": "https://apps.apple.com/app/id111111111",
+        "weight": 1,
+        "minDisplay": 5,
+        "maxShows": 3
+      }
+    ]
+  }
+}
