@@ -9,6 +9,15 @@
       "weight": 1,
       "minDisplay": 2,
       "maxShows": 3
+    },
+    {
+      "id": "hammer-golf-video",
+      "type": "video",
+      "url": "https://hammer-golf.com/editor/ads/video/hammer-golf.mp4",
+      "click": "https://apps.apple.com/app/6762349301",
+      "weight": 1,
+      "minDisplay": 5,
+      "maxShows": 3
     }
   ],
 
